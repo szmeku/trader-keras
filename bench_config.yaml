@@ -18,7 +18,7 @@ stage1:
   weight_decay: 0.0
   clip_grad_norm: 1.0
   train_ratio: 0.8
-  probabilistic: true
+  loss: "gaussian_nll"
   seed: 42
 
 data:
@@ -26,6 +26,6 @@ data:
   data_dir: "~/projects/data"
   load_limit: 0
 
-logging:
-  provider: [console]
+wandb:
+  tags: []
   project: "trader-keras"

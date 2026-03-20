@@ -20,9 +20,8 @@ class Stage1Config:
     weight_decay: float = 0.0
     clip_grad_norm: float = 1.0
     train_ratio: float = 0.8
-    probabilistic: bool = True
-    magnitude_alpha: float = 0.0
-    seed: int = -1  # -1 = no seed (OmegaConf needs concrete types)
+    loss: str = "gaussian_nll"  # "gaussian_nll" or "mse"
+    seed: int = 42
 
 
 @dataclass
@@ -33,8 +32,7 @@ class DataConfig:
 
 
 @dataclass
-class LoggingConfig:
-    provider: list[str] = field(default_factory=lambda: ["console"])
+class WandbConfig:
     tags: list[str] = field(default_factory=list)
     project: str = "trader-keras"
 
@@ -43,4 +41,4 @@ class LoggingConfig:
 class Config:
     stage1: Stage1Config = field(default_factory=Stage1Config)
     data: DataConfig = field(default_factory=DataConfig)
-    logging: LoggingConfig = field(default_factory=LoggingConfig)
+    wandb: WandbConfig = field(default_factory=WandbConfig)

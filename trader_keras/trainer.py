@@ -5,31 +5,16 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Any
 
+import wandb
 from omegaconf import DictConfig, OmegaConf
 
 from .data.loader import load_dataset
-from .models.gru import build_gru_model, gaussian_nll_loss, mse_loss
+from .models.gru import LOSSES, build_gru_model
 
 logger = logging.getLogger(__name__)
 
 _ARTIFACTS = Path("artifacts")
-
-
-def _init_wandb(cfg: DictConfig) -> bool:
-    """Init W&B if configured. Returns True if active."""
-    if "wandb" not in cfg.logging.provider:
-        return False
-    import wandb
-    api_key = os.environ.get("WANDB_API_TOKEN") or os.environ.get("WANDB_API_KEY")
-    if api_key:
-        wandb.login(key=api_key, relogin=False)
-    wandb.init(
-        project=cfg.logging.project, tags=list(cfg.logging.tags),
-        config=OmegaConf.to_container(cfg, resolve=True), reinit=True,
-    )
-    return True
 
 
 def train(cfg: DictConfig) -> Path:
@@ -40,16 +25,21 @@ def train(cfg: DictConfig) -> Path:
     os.environ.setdefault("KERAS_BACKEND", "jax")
 
     s1 = cfg.stage1
-    if s1.seed >= 0:
-        keras.utils.set_random_seed(s1.seed)
+    keras.utils.set_random_seed(s1.seed)
 
-    use_wandb = _init_wandb(cfg)
+    # W&B — always init; disable via WANDB_MODE=disabled
+    api_key = os.environ.get("WANDB_API_TOKEN") or os.environ.get("WANDB_API_KEY")
+    if api_key:
+        wandb.login(key=api_key, relogin=False)
+    wandb.init(
+        project=cfg.wandb.project, tags=list(cfg.wandb.tags),
+        config=OmegaConf.to_container(cfg, resolve=True), reinit=True,
+    )
 
-    logger.info("Loading data…")
+    logger.info("Loading data...")
     x_train, y_train, x_val, y_val, feature_cols = load_dataset(cfg.data, s1)
     n_features = x_train.shape[2]
     n_horizons = len(s1.horizons)
-    val_exists = len(x_val) > 0
 
     logger.info(
         "Data: train=%d  val=%d  features=%d  horizons=%d",
@@ -59,16 +49,14 @@ def train(cfg: DictConfig) -> Path:
     model = build_gru_model(n_features, n_horizons, s1)
     model.summary(print_fn=logger.info)
 
-    loss_fn = (lambda y_true, y_pred: gaussian_nll_loss(y_true, y_pred, s1.magnitude_alpha)
-               if s1.probabilistic else mse_loss)
-
+    loss_fn = LOSSES[s1.loss]
     optimizer = keras.optimizers.AdamW(
         learning_rate=s1.lr, weight_decay=s1.weight_decay, clipnorm=s1.clip_grad_norm,
     )
     model.compile(optimizer=optimizer, loss=loss_fn)
 
-    monitor = "val_loss" if val_exists else "loss"
-    val_data = (x_val, y_val) if val_exists else None
+    val_data = (x_val, y_val) if len(x_val) else None
+    monitor = "val_loss" if val_data else "loss"
 
     _ARTIFACTS.mkdir(exist_ok=True)
     model_path = _ARTIFACTS / f"gru_predictor_{time.strftime('%Y%m%d_%H%M%S')}.keras"
@@ -89,19 +77,16 @@ def train(cfg: DictConfig) -> Path:
             metrics = {
                 "epoch": epoch,
                 "stage1/train_loss": logs.get("loss", float("nan")),
+                "stage1/val_loss": logs.get("val_loss", float("nan")),
                 "stage1/samples_per_sec": sps,
                 "stage1/elapsed_s": time.time() - self._t0,
             }
-            if val_exists and "val_loss" in logs:
-                metrics["stage1/val_loss"] = logs["val_loss"]
             logger.info(
                 "Epoch %d — loss=%.6f  val_loss=%.6f  samples/sec=%.0f",
-                epoch, logs.get("loss", float("nan")),
-                logs.get("val_loss", float("nan")), sps,
+                epoch, metrics["stage1/train_loss"],
+                metrics["stage1/val_loss"], sps,
             )
-            if use_wandb:
-                import wandb
-                wandb.log(metrics, step=epoch)
+            wandb.log(metrics, step=epoch)
 
     callbacks = [
         kc.EarlyStopping(monitor=monitor, patience=s1.patience, restore_best_weights=True, verbose=0),
@@ -111,12 +96,10 @@ def train(cfg: DictConfig) -> Path:
         _EpochLogger(),
     ]
 
-    logger.info("Training…")
+    logger.info("Training...")
     model.fit(x_train, y_train, epochs=s1.epochs, batch_size=s1.batch_size,
               validation_data=val_data, callbacks=callbacks, verbose=0, shuffle=False)
 
-    if use_wandb:
-        import wandb
-        wandb.finish()
+    wandb.finish()
     logger.info("Model saved to %s", model_path)
     return model_path

@@ -20,16 +20,14 @@ stage1:
   weight_decay: 0.0
   clip_grad_norm: 1.0
   train_ratio: 0.8
-  probabilistic: true
-  magnitude_alpha: 0.0
-  seed: -1              # -1 = no seed
+  loss: "gaussian_nll"
+  seed: 42
 
 data:
   pattern: "icmarkets_eurusd_*_1m.parquet"
   data_dir: "~/projects/data"
   load_limit: 0         # 0 = load everything; set e.g. 50000 for quick tests
 
-logging:
-  provider: [console]   # [wandb], [console], or [wandb, console]
+wandb:
   tags: []
   project: "trader-keras"

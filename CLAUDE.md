@@ -2,72 +2,51 @@ Before you do anything say hello Simon.
 
 Don't ignore any of the points in this whole document please.
 
-## Workflow:
-- **Always read `docs/` and `README.md` first** before exploring or modifying code — they are the primary source of truth for architecture, config, and conventions
-- After every successful iteration, **update the relevant docs/** to keep them in sync with code changes
-- Do **small, focused changes** — iterate repeatedly each time running tests so you get feedback from reality
-- Before committing, **all tests must pass**
-- **Commit at every iteration/integration step**
-- Work through as many iterations until you have promising results as needed (don't bother user too often unless they are crucial doubts)
-- After each iteration update STATUS.MD with progress of work
-- Report: status, metrics
-- When tasks involve bottleneck hardware (e.g., GPUs), ensure that no more than one agent per machine is assigned such a task at any given time. Running multiple agents that compete for the same hardware resource can lead to conflicts and unreliable results.
-- remember to save your tokens if possible, you can run dumber agents to do simpler work, you have access to opencode cli where you can run "openrouter/moonshotai/kimi-k2.5" (i'm signed in)
-- **Never read large log files whole** — always `tail`, `head`, or `wc -l` first. Logs (MT5 tester, training, etc.) can be 50k+ lines and will eat all context tokens. Use targeted searches (`grep`, `tail -c`) instead.
-- After bigger changes update docs/ (use features like links between docs — user reads them in Obsidian)
-- if on your way you notice/problem that is beyond your scope ands is not quick fix you should append it to docs/issues.md with all necessary details about the problem (and date_time of the report)
-- **Remote training monitoring:** When running VastAI/remote training, check logs every ~1 minute (tail last few lines) to catch failures early. Don't sleep for 5-10 minutes between checks — errors like OOM, SSH failures, or preemptions should be detected quickly.
-- **Use existing CLI tools first:** The CLI (`run.py`, `tools/`) is the **first place to go** for any operation. Only fall back to inline Python when the CLI genuinely cannot do what you need.
-  - **Train**: `python run.py train config.yml`
-  - **Re-evaluate**: `python run.py train eval_config.yml` (with `stage1.train: false` + `existing_wandb_run`)
-  - **Anything the CLI can't do** → inline Python is acceptable (e.g., one-off debugging, ad-hoc queries)
-- few agents can work on the same codebase, that's why for bigger tasks you have to work in separate worktree (subfolder) and do PR at the end
+## Core Metric
+
+**Maintainability is the primary quality metric.** Every decision — naming, structure, abstraction, dependency — should optimize for "how easy is this to understand and change 6 months from now?" Clever code that's hard to maintain is bad code.
+
+## Workflow
+- **Read `docs/` and `README.md` first** — they are the source of truth for architecture and conventions
+- **Small, focused changes** — iterate, run tests each time, commit at every integration step
+- All tests must pass before committing
+- After each iteration update `STATUS.md`; after bigger changes update `docs/`
+- Work through iterations autonomously — only ask user on crucial doubts
+- If you notice a problem beyond scope, append to `docs/issues.md` with date and details
+- For bigger tasks, work in a separate worktree and PR at the end
+- Save tokens: use dumber agents (`opencode` with `openrouter/moonshotai/kimi-k2.5`) for simple work
+- **Never read large log files whole** — use `tail`, `head`, `grep` first
+- When monitoring remote training, check logs every ~1 minute
+- One GPU-bound agent per machine at a time
 
 ## Development Standards
 
-**Size & Structure:**
-- ~150-200 lines per file max
-- High modularity — extract early, extract often
-- Before creating any file, function, or module — **check what already exists**. Duplication is the cardinal sin.
-- don't blow up the codebase
+- **~150-200 lines per file max** — extract early, extract often
+- **No duplication** — check what exists before creating anything
+- **Minimal ifs** — make exceptional cases the standard case (Linus Torvalds style)
+- **Single source of truth** — never repeat the same information in multiple places
+- **Functional style** when it doesn't add overhead — composability, straight-forward flows
+- **Strict typing everywhere** — run `mypy` / `pyright`
+- Prefer libraries over hand-rolled solutions; check existing deps before adding new ones
+- Stick to existing naming conventions unless you have a better one — ask before changing
+- Write small, focused unit tests; sanity-check on small data before scaling
+- Non-trivial architecture decisions go in `DECISIONS.md`: Context, Options, Decision, Reasoning
 
-**Quality:**
-- Clever simplicity — the smartest solution to a hard problem is a simple one
-- Clean code principles; optimize for readability and maintainability
-- Strict typing everywhere; run type checkers (`mypy` / `pyright`)
-- Before adding a new dependency, check if an existing one already covers the need
-- No ambiguity
-- less ifs then better, make our exceptional cases as our standard cases (follow Linus Torvalds thinking in it)
-- Never write by yourself something that is available as a library — good coders use others' solutions
-- Default to finding generic patterns and shared abstractions; DRY aggressively
-- use functional style programming when doesn't introduce computing/ram/resources overhead, simple straight forward flows, composability etc 
-- when we already have some naming convention we should stick to it unless you figured out better one, ask user before the change 
-- when possible single source of truth, repeating same stuff in many places makes it nigthmare to maintain
+## CLI
 
-**Verification:**
-- Write small, focused unit tests; run them every iteration
-- Run sanity checks on small data samples before scaling up
+- `python run.py` — train with default config (Hydra)
+- `python run.py --config-name=bench` — use bench config
+- `python run.py stage1.lr=0.001 data.load_limit=50000` — override params
+- Disable W&B: `WANDB_MODE=disabled python run.py`
 
-**Architecture Decisions:**
-- For non-trivial choices, append to `DECISIONS.md`:
-  `## [Date] Title` → Context, Options, Decision, Reasoning
-- Every decision is **provisional** — revisit and overturn when evidence
-  or a better argument emerges. Nothing is sacred.
-
----
-
-## Current Focus
-- Current work is on Stage 1 (GRU predictor) and data pipeline
-
----
-
-## Project Config — `trader`
+## Project Config
 
 | Item | Value |
 |---|---|
-| Environment | we have .venv and alias u that equals 'uv run' |
-| Venv path | `~/projects/trader/.venv` |
+| Environment | `.venv` + alias `u` = `uv run` |
+| Venv path | `~/projects/trader-keras/.venv` |
 | Data path | `~/projects/data` |
+| Backend | Keras 3 + JAX (no TensorFlow) |
 
-- torch is installed with good version, never change it
-- All agents must activate this venv and use `uv` for dependency management.
+- All agents must use `uv` for dependency management
+- Current focus: Stage 1 (GRU predictor) and data pipeline

@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from trader_keras.config import Stage1Config
-from trader_keras.models.gru import build_gru_model, gaussian_nll_loss, mse_loss
+from trader_keras.models.gru import LOSSES, build_gru_model
 
 
 def _cfg(**kw) -> Stage1Config:
@@ -15,8 +15,8 @@ def _cfg(**kw) -> Stage1Config:
     return Stage1Config(**{**defaults, **kw})
 
 
-def test_model_output_shape_probabilistic():
-    cfg = _cfg(probabilistic=True)
+def test_model_output_shape_gaussian():
+    cfg = _cfg(loss="gaussian_nll")
     model = build_gru_model(n_features=8, n_horizons=2, cfg=cfg)
     x = np.random.randn(4, 10, 8).astype("float32")
     y = model(x, training=False)
@@ -24,7 +24,7 @@ def test_model_output_shape_probabilistic():
 
 
 def test_model_output_shape_mse():
-    cfg = _cfg(probabilistic=False)
+    cfg = _cfg(loss="mse")
     model = build_gru_model(n_features=8, n_horizons=2, cfg=cfg)
     x = np.random.randn(4, 10, 8).astype("float32")
     y = model(x, training=False)
@@ -35,7 +35,7 @@ def test_gaussian_nll_loss_finite():
     import keras
     y_true = np.random.randn(8, 2).astype("float32")
     y_pred = np.random.randn(8, 2, 2).astype("float32")
-    loss = gaussian_nll_loss(y_true, y_pred)
+    loss = LOSSES["gaussian_nll"](y_true, y_pred)
     val = float(keras.ops.convert_to_numpy(loss))
     assert np.isfinite(val), f"NLL loss is not finite: {val}"
 
@@ -44,7 +44,7 @@ def test_mse_loss_finite():
     import keras
     y_true = np.random.randn(8, 2).astype("float32")
     y_pred = np.random.randn(8, 2, 1).astype("float32")
-    loss = mse_loss(y_true, y_pred)
+    loss = LOSSES["mse"](y_true, y_pred)
     val = float(keras.ops.convert_to_numpy(loss))
     assert np.isfinite(val), f"MSE loss is not finite: {val}"
 
@@ -53,13 +53,12 @@ def test_model_compile_and_step():
     """Quick gradient step to verify training works end-to-end."""
     import keras
 
-    cfg = _cfg(probabilistic=True, lr=1e-3)
+    cfg = _cfg(loss="gaussian_nll")
     model = build_gru_model(n_features=8, n_horizons=2, cfg=cfg)
-    from trader_keras.models.gru import gaussian_nll_loss
 
     model.compile(
         optimizer=keras.optimizers.AdamW(learning_rate=1e-3),
-        loss=gaussian_nll_loss,
+        loss=LOSSES["gaussian_nll"],
     )
     x = np.random.randn(16, 10, 8).astype("float32")
     y = np.random.randn(16, 2).astype("float32")

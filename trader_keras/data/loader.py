@@ -14,14 +14,12 @@ from .features import create_features, create_targets
 logger = logging.getLogger(__name__)
 
 
-def _load_parquet(path: str, load_limit: int | None) -> pd.DataFrame:
+def _load_parquet(path: str, load_limit: int) -> pd.DataFrame:
     df = pd.read_parquet(path)
-    if "timestamp" not in df.columns and df.index.name == "timestamp":
+    if df.index.name == "timestamp":
         df = df.reset_index()
     df["timestamp"] = pd.to_datetime(df["timestamp"])
-    if load_limit > 0:
-        df = df.iloc[:load_limit]
-    return df
+    return df.iloc[:load_limit or None]
 
 
 def load_dataset(

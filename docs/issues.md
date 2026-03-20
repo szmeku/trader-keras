@@ -67,6 +67,19 @@ These files exceed the limit and are candidates for splitting:
   - `load_raw_bars('icmarkets_btcusd_*.parquet', load_limit=1440)` loads 2011 data ($0.68 BTC) instead of recent data ($70K). CEM script uses `df.iloc[-N:]` correctly.
   - Either add `load_offset` to config or support negative `load_limit` meaning "last N rows".
 
+## 2026-03-20 — W&B config rerun / reproducibility
+
+- [ ] **Rerun training from existing W&B run config**
+  - Use case: re-run or resume a past experiment using the exact config that produced it
+  - Desired flow: `python run.py +wandb_run=<run_id>` → fetch config from W&B API → merge as base config → local YAML/CLI overrides take precedence
+  - Implementation sketch:
+    1. Add a Hydra resolver or a pre-launch hook that calls `wandb.Api().run(f"{project}/{run_id}").config`
+    2. Convert the returned dict to an OmegaConf DictConfig
+    3. `OmegaConf.merge(wandb_config, local_config)` — local wins
+    4. Seed from the W&B config is preserved unless explicitly overridden
+  - This also enables eval-only re-runs: download config, set `stage1.train: false`, run evaluation on saved checkpoint
+  - Related: Hydra's `--config-dir` and `--config-name` already let you point at a saved YAML, but the W&B API approach avoids manual file management
+
 ## 2026-03-20 — JAX Env Sim Discrepancies
 
 - [x] **Same-direction pending order silently ignored** — FIXED 2026-03-20
