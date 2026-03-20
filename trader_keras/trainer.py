@@ -7,16 +7,26 @@ import time
 from pathlib import Path
 from typing import Any
 
-import numpy as np
-
-from .config import Config, Stage1Config
+from .config import Config
 from .data.loader import load_dataset
-from .logger import Logger, create_logger
 from .models.gru import build_gru_model, gaussian_nll_loss, mse_loss
 
 logger = logging.getLogger(__name__)
 
 _ARTIFACTS = Path("artifacts")
+
+
+def _init_wandb(cfg: Config) -> bool:
+    """Init W&B if configured. Returns True if active."""
+    providers = cfg.logging.provider if isinstance(cfg.logging.provider, list) else [cfg.logging.provider]
+    if "wandb" not in providers:
+        return False
+    import wandb
+    api_key = os.environ.get("WANDB_API_TOKEN") or os.environ.get("WANDB_API_KEY")
+    if api_key:
+        wandb.login(key=api_key, relogin=False)
+    wandb.init(project=cfg.logging.project, tags=cfg.logging.tags, config=cfg.model_dump(), reinit=True)
+    return True
 
 
 def train(cfg: Config) -> Path:
@@ -30,7 +40,7 @@ def train(cfg: Config) -> Path:
     if s1.seed is not None:
         keras.utils.set_random_seed(s1.seed)
 
-    log = create_logger(cfg.logging, cfg.model_dump())
+    use_wandb = _init_wandb(cfg)
 
     logger.info("Loading data…")
     x_train, y_train, x_val, y_val, feature_cols = load_dataset(cfg.data, s1)
@@ -50,9 +60,7 @@ def train(cfg: Config) -> Path:
                if s1.probabilistic else mse_loss)
 
     optimizer = keras.optimizers.AdamW(
-        learning_rate=s1.lr,
-        weight_decay=s1.weight_decay,
-        clipnorm=s1.clip_grad_norm,
+        learning_rate=s1.lr, weight_decay=s1.weight_decay, clipnorm=s1.clip_grad_norm,
     )
     model.compile(optimizer=optimizer, loss=loss_fn)
 
@@ -75,7 +83,7 @@ def train(cfg: Config) -> Path:
             logs = logs or {}
             epoch_time = time.time() - self._epoch_t0
             sps = len(x_train) / epoch_time if epoch_time > 0 else 0
-            metrics: dict[str, Any] = {
+            metrics = {
                 "epoch": epoch,
                 "stage1/train_loss": logs.get("loss", float("nan")),
                 "stage1/samples_per_sec": sps,
@@ -88,7 +96,9 @@ def train(cfg: Config) -> Path:
                 epoch, logs.get("loss", float("nan")),
                 logs.get("val_loss", float("nan")), sps,
             )
-            log.log(metrics, step=epoch)
+            if use_wandb:
+                import wandb
+                wandb.log(metrics, step=epoch)
 
     callbacks = [
         kc.EarlyStopping(monitor=monitor, patience=s1.patience, restore_best_weights=True, verbose=0),
@@ -102,6 +112,8 @@ def train(cfg: Config) -> Path:
     model.fit(x_train, y_train, epochs=s1.epochs, batch_size=s1.batch_size,
               validation_data=val_data, callbacks=callbacks, verbose=0, shuffle=False)
 
-    log.finish()
+    if use_wandb:
+        import wandb
+        wandb.finish()
     logger.info("Model saved to %s", model_path)
     return model_path
