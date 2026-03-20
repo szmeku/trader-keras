@@ -19,7 +19,7 @@ def _load_parquet(path: str, load_limit: int | None) -> pd.DataFrame:
     if "timestamp" not in df.columns and df.index.name == "timestamp":
         df = df.reset_index()
     df["timestamp"] = pd.to_datetime(df["timestamp"])
-    if load_limit:
+    if load_limit > 0:
         df = df.iloc[:load_limit]
     return df
 

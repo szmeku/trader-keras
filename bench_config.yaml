@@ -1,11 +1,14 @@
 # Benchmark config — matching trader-t5x for throughput comparison
-# 6 features, 200k rows, same model/batch/lookback
+hydra:
+  job:
+    chdir: false
+
 stage1:
   hidden_size: 64
   num_layers: 2
   dropout: 0.2
   lookback: 60
-  horizons: 10
+  horizons: [10]
   bar_seconds: 60
   stride: 1
   epochs: 5
@@ -17,19 +20,12 @@ stage1:
   train_ratio: 0.8
   probabilistic: true
   seed: 42
-  features:
-    - log_returns
-    - high
-    - low
-    - volume
-    - log_volume
-    - log_volatility
 
 data:
   pattern: "bench_eurusd_200k_1m.parquet"
   data_dir: "~/projects/data"
-  load_limit: null
+  load_limit: 0
 
 logging:
-  provider: console
+  provider: [console]
   project: "trader-keras"

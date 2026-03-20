@@ -17,10 +17,8 @@ dependencies = [
     "numpy>=1.24",
     # Experiment tracking
     "wandb>=0.17",
-    # Config
-    "pyyaml>=6.0",
-    # CLI
-    "typer>=0.12",
+    # Config + CLI
+    "hydra-core>=1.3",
     # Utilities
     "tqdm>=4.66",
 ]

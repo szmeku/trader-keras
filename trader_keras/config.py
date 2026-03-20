@@ -1,23 +1,16 @@
-"""Configuration — pydantic models + YAML loading."""
+"""Configuration — plain dataclasses for OmegaConf/Hydra."""
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Annotated
-
-import yaml
-from pydantic import BaseModel, BeforeValidator
+from dataclasses import dataclass, field
 
 
-def _wrap_scalar(v: object) -> object:
-    return [v] if isinstance(v, (int, float)) else v
-
-
-class Stage1Config(BaseModel):
+@dataclass
+class Stage1Config:
     hidden_size: int = 64
     num_layers: int = 2
     dropout: float = 0.2
     lookback: int = 60
-    horizons: Annotated[list[int], BeforeValidator(_wrap_scalar)] = [1, 5, 10, 30, 60]
+    horizons: list[int] = field(default_factory=lambda: [1, 5, 10, 30, 60])
     bar_seconds: int = 60
     stride: int = 1
     epochs: int = 100
@@ -29,30 +22,25 @@ class Stage1Config(BaseModel):
     train_ratio: float = 0.8
     probabilistic: bool = True
     magnitude_alpha: float = 0.0
-    seed: int | None = None
+    seed: int = -1  # -1 = no seed (OmegaConf needs concrete types)
 
 
-class DataConfig(BaseModel):
+@dataclass
+class DataConfig:
     pattern: str = "icmarkets_*.parquet"
     data_dir: str = "~/projects/data"
-    load_limit: int | None = None
+    load_limit: int = 0  # 0 = load everything
 
 
-class LoggingConfig(BaseModel):
-    provider: str | list[str] = "console"
-    tags: list[str] = []
+@dataclass
+class LoggingConfig:
+    provider: list[str] = field(default_factory=lambda: ["console"])
+    tags: list[str] = field(default_factory=list)
     project: str = "trader-keras"
 
 
-class Config(BaseModel):
-    stage1: Stage1Config = Stage1Config()
-    data: DataConfig = DataConfig()
-    logging: LoggingConfig = LoggingConfig()
-
-
-def load_config(path: str | Path) -> Config:
-    raw: dict = {}
-    if path and Path(path).exists():
-        with open(path) as f:
-            raw = yaml.safe_load(f) or {}
-    return Config(**raw)
+@dataclass
+class Config:
+    stage1: Stage1Config = field(default_factory=Stage1Config)
+    data: DataConfig = field(default_factory=DataConfig)
+    logging: LoggingConfig = field(default_factory=LoggingConfig)

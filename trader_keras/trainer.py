@@ -7,7 +7,8 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .config import Config
+from omegaconf import DictConfig, OmegaConf
+
 from .data.loader import load_dataset
 from .models.gru import build_gru_model, gaussian_nll_loss, mse_loss
 
@@ -16,20 +17,22 @@ logger = logging.getLogger(__name__)
 _ARTIFACTS = Path("artifacts")
 
 
-def _init_wandb(cfg: Config) -> bool:
+def _init_wandb(cfg: DictConfig) -> bool:
     """Init W&B if configured. Returns True if active."""
-    providers = cfg.logging.provider if isinstance(cfg.logging.provider, list) else [cfg.logging.provider]
-    if "wandb" not in providers:
+    if "wandb" not in cfg.logging.provider:
         return False
     import wandb
     api_key = os.environ.get("WANDB_API_TOKEN") or os.environ.get("WANDB_API_KEY")
     if api_key:
         wandb.login(key=api_key, relogin=False)
-    wandb.init(project=cfg.logging.project, tags=cfg.logging.tags, config=cfg.model_dump(), reinit=True)
+    wandb.init(
+        project=cfg.logging.project, tags=list(cfg.logging.tags),
+        config=OmegaConf.to_container(cfg, resolve=True), reinit=True,
+    )
     return True
 
 
-def train(cfg: Config) -> Path:
+def train(cfg: DictConfig) -> Path:
     """Full Stage 1 training run. Returns path to saved model."""
     import keras
     import keras.callbacks as kc
@@ -37,7 +40,7 @@ def train(cfg: Config) -> Path:
     os.environ.setdefault("KERAS_BACKEND", "jax")
 
     s1 = cfg.stage1
-    if s1.seed is not None:
+    if s1.seed >= 0:
         keras.utils.set_random_seed(s1.seed)
 
     use_wandb = _init_wandb(cfg)
