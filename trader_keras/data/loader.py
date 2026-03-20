@@ -1,4 +1,4 @@
-"""Data loading: parquet → OHLCV bars → features → numpy sequences."""
+"""Data loading: parquet → features → numpy sequences."""
 from __future__ import annotations
 
 import glob
@@ -9,16 +9,9 @@ import numpy as np
 import pandas as pd
 
 from ..config import DataConfig, Stage1Config
-from ..constants import DATA_DIR
-from .features import create_features, create_targets, select_features
-from .resampler import parse_bar_seconds_from_name, reaggregate_bars, resample_to_bars
+from .features import create_features, create_targets
 
 logger = logging.getLogger(__name__)
-
-# Columns expected in raw trade data parquets
-_TRADE_COLS = {"timestamp", "price", "amount", "side"}
-# Columns expected in pre-aggregated bar parquets
-_BAR_COLS = {"timestamp", "open", "high", "low", "close", "volume"}
 
 
 def _load_parquet(path: str, load_limit: int | None) -> pd.DataFrame:
@@ -31,53 +24,28 @@ def _load_parquet(path: str, load_limit: int | None) -> pd.DataFrame:
     return df
 
 
-def _is_bar_data(df: pd.DataFrame) -> bool:
-    return _BAR_COLS.issubset(df.columns) and not _TRADE_COLS.issubset(df.columns)
-
-
-def load_bars(path: str, bar_seconds: int, load_limit: int | None = None) -> pd.DataFrame:
-    """Load a single parquet file → OHLCV bars at bar_seconds resolution."""
-    df = _load_parquet(path, load_limit)
-    filename = Path(path).name
-
-    if _is_bar_data(df):
-        source_sec = parse_bar_seconds_from_name(filename) or bar_seconds
-        if source_sec != bar_seconds:
-            df = reaggregate_bars(df, source_sec, bar_seconds)
-        return df
-    else:
-        return resample_to_bars(df, bar_seconds)
-
-
 def load_dataset(
     data_cfg: DataConfig,
     stage1_cfg: Stage1Config,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[str]]:
-    """Full pipeline: parquet → bars → features → targets → train/val splits.
-
-    Returns:
-        x_train, y_train, x_val, y_val, feature_cols
-        Shapes:
-          x_*: (N, lookback, n_features)
-          y_*: (N, n_horizons, 1) — or (N, n_horizons, 2) if probabilistic (targets only, no sigma)
-    """
+    """Full pipeline: parquet → features → targets → train/val splits."""
     data_dir = Path(data_cfg.data_dir).expanduser()
-    pattern = data_cfg.pattern
-    paths = sorted(glob.glob(str(data_dir / pattern)))
+    paths = sorted(glob.glob(str(data_dir / data_cfg.pattern)))
     if not paths:
-        raise FileNotFoundError(f"No files matching '{pattern}' in {data_dir}")
+        raise FileNotFoundError(f"No files matching '{data_cfg.pattern}' in {data_dir}")
 
     all_x, all_y = [], []
     feature_cols: list[str] | None = None
 
     for path in paths:
         logger.info("Loading %s", path)
-        bars = load_bars(path, stage1_cfg.bar_seconds, data_cfg.load_limit)
-        df = create_features(bars, lookback=stage1_cfg.lookback)
+        bars = _load_parquet(path, data_cfg.load_limit)
+        df = create_features(bars)
         df, target_cols = create_targets(df, stage1_cfg.horizons)
 
         if feature_cols is None:
-            feature_cols = select_features(df, stage1_cfg.features)
+            from ..constants import FEATURE_COLS
+            feature_cols = [c for c in FEATURE_COLS if c in df.columns]
 
         x_arr, y_arr = _make_sequences(df, feature_cols, target_cols, stage1_cfg)
         all_x.append(x_arr)
@@ -85,7 +53,6 @@ def load_dataset(
 
     x = np.concatenate(all_x, axis=0)
     y = np.concatenate(all_y, axis=0)
-
     split = int(len(x) * stage1_cfg.train_ratio)
     return x[:split], y[:split], x[split:], y[split:], feature_cols or []
 
@@ -98,14 +65,10 @@ def _make_sequences(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Slide a window of `lookback` over the feature array."""
     x_data = df[feature_cols].values.astype(np.float32)
-    y_data = df[target_cols].values.astype(np.float32)  # (T, n_horizons)
+    y_data = df[target_cols].values.astype(np.float32)
 
     n = len(x_data)
-    lookback = cfg.lookback
-    stride = cfg.stride
-
-    starts = range(0, n - lookback + 1, stride)
-    x_seqs = np.stack([x_data[i : i + lookback] for i in starts])  # (N, L, F)
-    y_seqs = np.stack([y_data[i + lookback - 1] for i in starts])  # (N, H)
-
+    starts = range(0, n - cfg.lookback + 1, cfg.stride)
+    x_seqs = np.stack([x_data[i : i + cfg.lookback] for i in starts])
+    y_seqs = np.stack([y_data[i + cfg.lookback - 1] for i in starts])
     return x_seqs, y_seqs
