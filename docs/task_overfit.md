@@ -1,0 +1,3 @@
+- works well with small amount of samples
+- doesn't work yet for 70k 
+- run on current code same config and check if results match

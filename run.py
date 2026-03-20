@@ -13,6 +13,13 @@ from pathlib import Path
 # Set JAX backend BEFORE any keras import
 os.environ.setdefault("KERAS_BACKEND", "jax")
 
+# Work around cuBLAS autotuning failures on older GPUs (e.g. GTX 1050 Ti)
+xla_flags = os.environ.get("XLA_FLAGS", "")
+for flag in ("--xla_gpu_autotune_level=0", "--xla_gpu_enable_cublaslt=false"):
+    if flag not in xla_flags:
+        xla_flags = f"{xla_flags} {flag}".strip()
+os.environ["XLA_FLAGS"] = xla_flags
+
 import typer
 
 app = typer.Typer(add_completion=False)

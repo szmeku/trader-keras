@@ -1,0 +1,3 @@
+- pearson covariance(a,b)/(stda, stdb)
+- adamW optimizer ? weights decay
+- how GRU is build 

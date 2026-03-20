@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "trader-keras"
+version = "0.1.0"
+description = "Crypto trading predictor using Keras 3 + JAX backend"
+requires-python = ">=3.11"
+dependencies = [
+    # Keras3 with JAX GPU backend
+    "keras>=3.0",
+    "jax[cuda12]>=0.4.30",
+    # Data
+    "pandas>=2.0",
+    "pyarrow>=14.0",
+    "numpy>=1.24",
+    # Experiment tracking
+    "wandb>=0.17",
+    # Config
+    "pyyaml>=6.0",
+    # CLI
+    "typer>=0.12",
+    # Utilities
+    "tqdm>=4.66",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "mypy>=1.8"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["trader_keras"]
+
+[tool.mypy]
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
