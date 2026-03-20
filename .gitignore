@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing / caching
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Artifacts (model checkpoints, etc.)
+artifacts/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# uv
+.python-version
+
+# Logs
+*.log
+
+# W&B
+wandb/
