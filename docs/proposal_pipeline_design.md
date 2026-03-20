@@ -18,7 +18,7 @@ def pipe(ctx, *steps):
 ```
 trader_keras/
   config.py        # Hydra dataclasses
-  backbone.py      # BACKBONES registry (GRU, LSTM, Transformer, ...)
+  backbone.py      # backbone architectures (GRU, LSTM, Transformer, ...)
   steps.py         # atomic step functions: ctx → ctx
   pipelines.py     # compositions of steps
   run.py           # entry point, PIPELINES registry
@@ -33,7 +33,7 @@ def load(ctx):        # parquet → DataFrame
 def featurize(ctx):   # log-ratio features
 def window(ctx):      # sliding window → (X, Y) splits (supervised)
 def env(ctx):         # wrap same bars as stepping environment (RL)
-def model(ctx):       # backbone + heads from config (registries)
+def model(ctx):       # backbone + heads from config
 def checkpoint(ctx):  # load weights + optional freeze
 def fit_supervised(ctx):  # keras model.fit()
 def fit_rl(ctx):          # rollout → PPO update loop

@@ -29,7 +29,7 @@ Don't ignore any of the points in this whole document please.
 - **Strict typing everywhere** — run `mypy` / `pyright`
 - Prefer libraries over hand-rolled solutions; check existing deps before adding new ones
 - Stick to existing naming conventions unless you have a better one — ask before changing
-- Write small, focused unit tests; sanity-check on small data before scaling
+- Follow TDD: always write failing test first, then minimal code to make it pass, then refactor. Write small, focused unit tests; sanity-check on small data before scaling
 - Non-trivial architecture decisions go in `DECISIONS.md`: Context, Options, Decision, Reasoning
 
 ## CLI

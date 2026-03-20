@@ -4,101 +4,92 @@
 
 Three registries — `BACKBONES`, `HEADS`, `LOSSES` — same pattern. Swap anything via config, zero ifs. Adding a new component is one decorated function.
 
-## Pattern
+## Generic registry factory (from trader)
+
+trader has a battle-tested `make_registry()` that creates register/create/registry for any component type:
 
 ```python
-REGISTRY = {}
+# registry.py
+def make_registry(description: str = "item"):
+    reg: dict[str, type] = {}
 
-def _register(fn):
-    REGISTRY[fn.__name__] = fn
-    return fn
+    def register(key: str):
+        def decorator(cls):
+            reg[key] = cls
+            return cls
+        return decorator
+
+    def create(key: str, **kwargs):
+        if key not in reg:
+            raise ValueError(f"Unknown {description} {key!r}. Available: {sorted(reg)}")
+        return reg[key](**kwargs)
+
+    return register, create, reg
+```
+
+One factory, all registries:
+
+```python
+register_backbone, create_backbone, BACKBONES = make_registry("backbone")
+register_loss, create_loss, LOSSES = make_registry("loss")
 ```
 
 ## BACKBONES registry
 
-Contract: any backbone must be `(batch, seq, features) → (batch, hidden)`.
+Contract: any backbone must expose `get_embedding()` → `(batch, hidden)`.
+
+Both prediction heads and policy heads consume the same embedding. Freeze/unfreeze applies at this boundary.
 
 ```python
-BACKBONES = {}
-
-@_register
-def gru(cfg, n_features):
-    inputs = keras.Input(shape=(cfg.lookback, n_features))
-    x = inputs
-    for i in range(cfg.num_layers):
-        x = layers.GRU(cfg.hidden_size, return_sequences=(i < cfg.num_layers - 1),
-                       dropout=cfg.dropout, name=f"gru_{i}")(x)
-    return keras.Model(inputs, x, name="gru_backbone")
-
-@_register
-def lstm(cfg, n_features):
-    ...
-
-@_register
-def transformer(cfg, n_features):
-    ...
+@register_backbone("gru")
+class GRUBackbone:
+    def get_embedding(self, x):
+        """(batch, seq, features) → (batch, hidden)"""
+        out = self.gru(x)
+        return out[:, -1, :]
 ```
 
-Config:
-
-```yaml
-backbone:
-  type: gru            # registry lookup
-  hidden_size: 64
-  num_layers: 2
-  checkpoint: null
-  freeze: false
-```
-
-## HEADS registry
-
-Contract: takes `hidden_size` and config, returns head layers.
-
-```python
-HEADS = {}
-
-@_register
-def predict(hidden_size, cfg):
-    """Per-horizon Dense heads → (batch, n_horizons, n_out)"""
-    ...
-
-@_register
-def policy(hidden_size, cfg):
-    """Action distribution head for RL"""
-    ...
-
-@_register
-def value(hidden_size, cfg):
-    """Value function head for RL"""
-    ...
-```
+Config: `backbone.type: gru` → registry lookup.
 
 ## LOSSES registry (already implemented)
 
 ```python
-LOSSES = {}
-
-@_register
+@_register_loss
 def gaussian_nll(y_true, y_pred): ...
 gaussian_nll.n_out = 2
 
-@_register
+@_register_loss
 def mse(y_true, y_pred): ...
 mse.n_out = 1
 ```
 
-## Model assembly — no ifs
+## Shared config base (from trader)
+
+trader uses `StageConfig` base class with shared fields inherited by stage-specific configs:
 
 ```python
-def build_model(cfg, n_features):
-    backbone = BACKBONES[cfg.backbone.type](cfg.backbone, n_features)
-    head = HEADS[cfg.heads.type](backbone.output_shape[-1], cfg)
-    return assemble(backbone, head)
+@dataclass
+class StageConfig:
+    hidden_size: int = 64
+    num_layers: int = 2
+    lookback: int = 60
+    batch_size: int = 1024
+    lr: float = 3e-4
+    seed: int = 42
+
+@dataclass
+class PredictConfig(StageConfig):
+    horizons: list[int] = field(default_factory=lambda: [10])
+    loss: str = "gaussian_nll"
+
+@dataclass
+class RLConfig(StageConfig):
+    algorithm: str = "ppo"
+    rollout_steps: int = 2048
 ```
 
-## Benefits
+## Lessons from trader
 
-- Adding a new backbone/head/loss = one function + decorator
-- Config drives all choices — no code changes to try new architectures
-- Same pattern everywhere — learn once, apply to all three registries
-- Checkpoint/freeze works on any backbone — the contract guarantees compatibility
+**Take:** `make_registry()`, `get_embedding()` backbone contract, `StageConfig` base class
+
+**Avoid:** forecaster protocol bundles prepare_data + build_model + train + evaluate into one class — can't mix steps across architectures
