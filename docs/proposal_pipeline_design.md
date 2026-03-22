@@ -2,7 +2,7 @@
 
 ## Status
 
-All core steps implemented and tested (69 tests passing).
+All core steps implemented and tested (70 tests passing).
 
 | Step | File | Status |
 |---|---|---|
@@ -39,25 +39,25 @@ Config selects pipeline and optionally skips steps:
 python run.py                                    # default: predict
 python run.py pipeline=rl                        # switch to RL
 python run.py pipeline.skip=[checkpoint]         # skip checkpoint loading
-python run.py stage1.lr=0.001                    # override params
+python run.py train.lr=0.001                     # override params
 ```
 
 ## Hydra config groups
 
 ```
 conf/
-  config.yaml              # shared: data, wandb
+  config.yaml              # shared: backbone, data, wandb
   pipeline/
-    predict.yaml           # @package _global_ — stage1 params
-    rl.yaml                # @package _global_ — stage1 + env + rl params
+    predict.yaml           # @package _global_ — train params
+    rl.yaml                # @package _global_ — data overrides + env + rl params
+    bench.yaml             # @package _global_ — benchmark config
 ```
 
-Pipeline yamls use `@package _global_` so `stage1`, `env`, `rl` merge at root level.
-`cfg.stage1.lr` works everywhere — no `cfg.pipeline.stage1` nesting.
+Pipeline yamls use `@package _global_` so `train`, `env`, `rl` merge at root level.
+`cfg.train.lr` works everywhere — no `cfg.pipeline.train` nesting.
 
 ## Remaining work
 
-- `predict_then_rl` composed pipeline (needs backbone `get_embedding()` boundary)
-- Backbone swapping via registry (GRU, LSTM, Transformer)
-- `make_registry()` generic factory (see `plan_registry.md`)
-- `get_embedding()` contract (see `plan_backbone_embedding.md`)
+- `predict_then_rl` composed pipeline (use Keras model surgery to slice backbone)
+- Backbone swapping via registry (GRU, LSTM, Transformer) — see `plan_registry.md`
+- Streaming GRU (batch-as-isolation, lookback-as-reset) — see `open_lookback_windowing.md`
