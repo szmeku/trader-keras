@@ -26,4 +26,4 @@ trader_keras/registry.py
 
 ## Status
 
-Not started — extract when we begin implementing the pipeline architecture.
+Not started. Pipeline architecture is implemented. LOSSES registry exists as hand-rolled dict in `models/gru.py`. Extract `make_registry()` when adding BACKBONES or HEADS registries.

@@ -1,0 +1,25 @@
+defaults:
+  - _self_
+  - pipeline: predict
+
+hydra:
+  job:
+    chdir: false
+
+backbone:
+  hidden_size: 64
+  num_layers: 2
+  dropout: 0.2
+  seed: 42
+
+data:
+  pattern: "icmarkets_eurusd_*_1m.parquet"
+  data_dir: "~/projects/data"
+  load_limit: 0
+  lookback: 60
+  stride: 1
+  bar_seconds: 60
+
+wandb:
+  tags: []
+  project: "trader-keras"

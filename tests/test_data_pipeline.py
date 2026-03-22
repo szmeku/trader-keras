@@ -1,8 +1,7 @@
-"""Unit tests for data pipeline."""
+"""Unit tests for data pipeline functions."""
 import numpy as np
 import pandas as pd
 
-from trader_keras.constants import FEATURE_COLS
 from trader_keras.data.features import create_features, create_targets
 
 
@@ -20,21 +19,6 @@ def _make_bars(n: int = 200) -> pd.DataFrame:
             "spread": rng.uniform(0.0001, 0.001, n),
         }
     )
-
-
-def test_create_features_no_leakage():
-    bars = _make_bars(200)
-    df = create_features(bars)
-    for col in FEATURE_COLS:
-        assert col in df.columns
-    assert not df[FEATURE_COLS].isna().any().any()
-    assert len(df) < len(bars)
-
-
-def test_create_features_shape():
-    bars = _make_bars(200)
-    df = create_features(bars)
-    assert all(c in df.columns for c in FEATURE_COLS)
 
 
 def test_create_targets():

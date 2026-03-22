@@ -1,36 +1,48 @@
 #!/usr/bin/env python
-"""Train Stage 1 GRU predictor.
+"""Pipeline entry point.
 
 Usage:
-    python run.py                          # default config.yml
-    python run.py --config-name=bench      # use bench.yml
-    python run.py stage1.lr=0.001          # override any param
-    python run.py data.load_limit=50000 stage1.epochs=5
+    python run.py                              # default: predict pipeline
+    python run.py pipeline=rl                  # RL pipeline
+    python run.py train.lr=0.001               # override params
+    python run.py data.load_limit=50000
 """
 import logging
 import os
 
 os.environ.setdefault("KERAS_BACKEND", "jax")
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 
-# Work around cuBLAS autotuning failures on older GPUs (e.g. GTX 1050 Ti)
-xla_flags = os.environ.get("XLA_FLAGS", "")
-for flag in ("--xla_gpu_autotune_level=0", "--xla_gpu_enable_cublaslt=false"):
-    if flag not in xla_flags:
-        xla_flags = f"{xla_flags} {flag}".strip()
-os.environ["XLA_FLAGS"] = xla_flags
-
+import keras
 import hydra
 from omegaconf import DictConfig
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger(__name__)
+
+from trader_keras.pipeline import pipe
+from trader_keras.steps.data import load, featurize, window
+from trader_keras.steps.model import model, checkpoint
+from trader_keras.steps.train import fit_supervised, save
+from trader_keras.steps.env import env
+from trader_keras.steps.rl import fit_rl
+
+PIPELINES = {
+    "predict": [load, featurize, window, model, checkpoint, fit_supervised, save],
+    "rl":      [load, featurize, env, model, checkpoint, fit_rl, save],
+}
 
 
-@hydra.main(config_path=".", config_name="config", version_base="1.3")
+@hydra.main(config_path="conf", config_name="config", version_base="1.3")
 def main(cfg: DictConfig) -> None:
-    from trader_keras.trainer import train
-
-    model_path = train(cfg)
-    print(f"Done. Model: {model_path}")
+    pipeline_name = cfg.pipeline.name
+    keras.utils.set_random_seed(cfg.backbone.seed)
+    pipeline = PIPELINES[pipeline_name]
+    skip = set(cfg.pipeline.get("skip", []))
+    steps = [s for s in pipeline if s.__name__ not in skip]
+    logger.info("Pipeline: %s  skip: %s", pipeline_name, skip or "(none)")
+    ctx = pipe({"cfg": cfg}, *steps)
+    print(f"Done. Model: {ctx.get('model_path')}")
 
 
 if __name__ == "__main__":

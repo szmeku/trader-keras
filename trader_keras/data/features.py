@@ -4,7 +4,9 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from ..constants import FEATURE_COLS
+FEATURE_COLS: list[str] = [
+    "log_open", "log_high", "log_low", "log_close", "log_volume", "log_spread",
+]
 
 
 def create_features(bars: pd.DataFrame) -> pd.DataFrame:

@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "trader-keras"
 version = "0.1.0"
 description = "Crypto trading predictor using Keras 3 + JAX backend"
-requires-python = ">=3.11"
+requires-python = ">=3.13"
 dependencies = [
     # Keras3 with JAX GPU backend
     "keras>=3.0",
@@ -21,6 +21,7 @@ dependencies = [
     "hydra-core>=1.3",
     # Utilities
     "tqdm>=4.66",
+    "icmarkets-env",
 ]
 
 [project.optional-dependencies]
@@ -35,3 +36,6 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.uv.sources]
+icmarkets-env = { path = "../trader-rl-icmarkets-env", editable = true }

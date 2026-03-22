@@ -20,10 +20,12 @@ def _register_loss(fn):
     return fn
 
 
-def build_gru_model(n_features: int, n_horizons: int, cfg) -> keras.Model:
+def build_gru_model(
+    n_features: int, n_horizons: int, cfg, loss_name: str, lookback: int,
+) -> keras.Model:
     """Build GRU stack → per-horizon output heads."""
-    n_out = LOSSES[cfg.loss].n_out
-    inputs = keras.Input(shape=(cfg.lookback, n_features), name="sequence")
+    n_out = LOSSES[loss_name].n_out
+    inputs = keras.Input(shape=(lookback, n_features), name="sequence")
 
     x = inputs
     for i in range(cfg.num_layers):

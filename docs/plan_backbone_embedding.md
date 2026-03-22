@@ -38,4 +38,4 @@ Freeze/unfreeze applies at the `get_embedding()` boundary: `backbone.trainable =
 
 ## Status
 
-Not started — implement when building backbone swapping (together with registry).
+Not started. Currently GRU predictor and RL policy are separate models. Implement `get_embedding()` when building the `predict_then_rl` composed pipeline (freeze backbone → swap heads).

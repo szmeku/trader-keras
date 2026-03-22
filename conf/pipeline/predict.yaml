@@ -1,0 +1,15 @@
+# @package _global_
+pipeline:
+  name: predict
+  skip: []
+
+train:
+  horizons: [10]
+  epochs: 100
+  patience: 10
+  batch_size: 1024
+  lr: 0.0003
+  weight_decay: 0.0
+  clip_grad_norm: 1.0
+  train_ratio: 0.8
+  loss: "gaussian_nll"

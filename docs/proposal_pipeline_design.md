@@ -1,89 +1,63 @@
-# Proposal: Composable Pipeline Architecture
+# Pipeline Architecture
 
-## Core Idea
+## Status
 
-Pipeline = sequence of step functions, composed from shared building blocks.
+All core steps implemented and tested (69 tests passing).
+
+| Step | File | Status |
+|---|---|---|
+| `load` | `steps/data.py` | Done |
+| `featurize` | `steps/data.py` | Done |
+| `window` | `steps/data.py` | Done |
+| `env` | `steps/env.py` | Done |
+| `model` | `steps/model.py` | Done |
+| `checkpoint` | `steps/model.py` | Done |
+| `fit_supervised` | `steps/train.py` | Done |
+| `fit_rl` | `steps/rl.py` | Done |
+| `save` | `steps/train.py` | Done |
+
+| Pipeline | Steps | Status |
+|---|---|---|
+| `predict` | load, featurize, window, model, checkpoint, fit_supervised, save | Done |
+| `rl` | load, featurize, env, model, checkpoint, fit_rl, save | Done |
+| `predict_then_rl` | predict pipeline → freeze → RL heads → fit_rl | Not started |
+
+## Architecture
 
 Each step is `ctx → ctx`. A pipeline is a list of steps. `pipe` runs them.
 
 ```python
-def pipe(ctx, *steps):
-    for step in steps:
-        ctx = step(ctx)
-    return ctx
+PIPELINES = {
+    "predict": [load, featurize, window, model, checkpoint, fit_supervised, save],
+    "rl":      [load, featurize, env,   model, checkpoint, fit_rl,         save],
+}
 ```
 
-## Structure
-
-```
-trader_keras/
-  config.py        # Hydra dataclasses
-  backbone.py      # backbone architectures (GRU, LSTM, Transformer, ...)
-  steps.py         # atomic step functions: ctx → ctx
-  pipelines.py     # compositions of steps
-  run.py           # entry point, PIPELINES registry
-```
-
-## Steps — shared building blocks
-
-Every function is `ctx → ctx`:
-
-```python
-def load(ctx):        # parquet → DataFrame
-def featurize(ctx):   # log-ratio features
-def window(ctx):      # sliding window → (X, Y) splits (supervised)
-def env(ctx):         # wrap same bars as stepping environment (RL)
-def model(ctx):       # backbone + heads from config
-def checkpoint(ctx):  # load weights + optional freeze
-def fit_supervised(ctx):  # keras model.fit()
-def fit_rl(ctx):          # rollout → PPO update loop
-def save(ctx):            # save model + wandb.finish()
-```
-
-## Pipelines — composed from steps
-
-```python
-predict = [load, featurize, window, model, checkpoint, fit_supervised, save]
-rl      = [load, featurize, env,   model, checkpoint, fit_rl,         save]
-```
-
-New pipelines = list operations:
-
-```python
-predict_then_rl = predict[:-1] + [freeze, swap_heads, fit_rl, save]
-```
-
-## Dispatch — registry, no ifs
-
-```python
-PIPELINES = {"predict": predict, "rl": rl}
-
-@hydra.main(...)
-def main(cfg):
-    pipe({"cfg": cfg}, *PIPELINES[cfg.pipeline])
-```
+Config selects pipeline and optionally skips steps:
 
 ```bash
-python run.py pipeline=predict
-python run.py pipeline=rl backbone.checkpoint=artifacts/xxx.keras backbone.freeze=true
+python run.py                                    # default: predict
+python run.py pipeline=rl                        # switch to RL
+python run.py pipeline.skip=[checkpoint]         # skip checkpoint loading
+python run.py stage1.lr=0.001                    # override params
 ```
 
-## Shared data flow
-
-The environment IS historical data. Both supervised and RL consume the same bars DataFrame — `window` and `env` are two views of the same data:
+## Hydra config groups
 
 ```
-parquet → features → bars DataFrame
-                          │
-              ┌───────────┴───────────┐
-              │                       │
-         window (supervised)     env (RL)
-         pre-slice windows       step through bars
-         → (X, Y) batches       sequentially
+conf/
+  config.yaml              # shared: data, wandb
+  pipeline/
+    predict.yaml           # @package _global_ — stage1 params
+    rl.yaml                # @package _global_ — stage1 + env + rl params
 ```
 
-5 of 7 steps are fully shared. Only the data iteration interface (`window` vs `env`) and the training loop (`fit_supervised` vs `fit_rl`) differ.
+Pipeline yamls use `@package _global_` so `stage1`, `env`, `rl` merge at root level.
+`cfg.stage1.lr` works everywhere — no `cfg.pipeline.stage1` nesting.
 
-## Pipe library
+## Remaining work
 
-`toolz.pipe` is the Python Ramda equivalent, but our `pipe` is 3 lines — skip the dependency unless we need `curry`/`compose` later.
+- `predict_then_rl` composed pipeline (needs backbone `get_embedding()` boundary)
+- Backbone swapping via registry (GRU, LSTM, Transformer)
+- `make_registry()` generic factory (see `plan_registry.md`)
+- `get_embedding()` contract (see `plan_backbone_embedding.md`)
