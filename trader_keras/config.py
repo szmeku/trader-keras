@@ -53,6 +53,7 @@ class RLConfig:
     lr: float = 3e-4
     batch_size: int = 64
     total_timesteps: int = 1_000_000
+    clip_grad_norm: float = 1.0
 
 
 @dataclass

@@ -20,8 +20,8 @@ def ppo_loss_from_outputs(
     action_log_probs = ops.squeeze(action_log_probs, axis=-1)
 
     # Gaussian log probs for p0 and p1
-    p0_lp = _gaussian_log_prob_batch(batch["p0s"], p0_params[:, 0], p0_params[:, 1])
-    p1_lp = _gaussian_log_prob_batch(batch["p1s"], p1_params[:, 0], p1_params[:, 1])
+    p0_lp = gaussian_log_prob(batch["p0s"], p0_params[:, 0], p0_params[:, 1])
+    p1_lp = gaussian_log_prob(batch["p1s"], p1_params[:, 0], p1_params[:, 1])
 
     new_log_probs = action_log_probs + p0_lp + p1_lp
 
@@ -36,14 +36,23 @@ def ppo_loss_from_outputs(
     # Value loss
     value_loss = ops.mean(ops.square(values - batch["returns"]))
 
-    # Entropy bonus (categorical only)
+    # Entropy bonus (categorical + Gaussian)
     probs = ops.softmax(logits)
-    entropy = -ops.mean(ops.sum(probs * log_probs_cat, axis=-1))
+    cat_entropy = -ops.mean(ops.sum(probs * log_probs_cat, axis=-1))
+
+    # Gaussian entropy: 0.5 * ln(2*pi*e*std^2) = 0.5 + ln(std) + 0.5*ln(2*pi)
+    p0_std = ops.exp(ops.clip(p0_params[:, 1], -5.0, 2.0))
+    p1_std = ops.exp(ops.clip(p1_params[:, 1], -5.0, 2.0))
+    gauss_entropy = ops.mean(
+        0.5 + ops.log(p0_std) + 0.5 * np.log(2 * np.pi)
+        + 0.5 + ops.log(p1_std) + 0.5 * np.log(2 * np.pi)
+    )
+    entropy = cat_entropy + gauss_entropy
 
     return policy_loss + value_coeff * value_loss - entropy_coeff * entropy
 
 
-def _gaussian_log_prob_batch(x, mean, log_std):
-    """Batched Gaussian log-probability."""
+def gaussian_log_prob(x, mean, log_std):
+    """Gaussian log-probability. Takes log_std (clipped to [-5, 2])."""
     std = ops.exp(ops.clip(log_std, -5.0, 2.0))
     return -0.5 * ops.square((x - mean) / std) - ops.log(std) - 0.5 * np.log(2 * np.pi)

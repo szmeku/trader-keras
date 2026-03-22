@@ -1,90 +1,24 @@
-"""RL pipeline step: PPO training loop with actor-critic policy."""
+"""RL pipeline step: PPO training loop with JIT-compiled rollouts."""
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 import jax
+from jax import numpy as jnp
 import keras
 import numpy as np
 import wandb
 from omegaconf import OmegaConf
 
+from icmarkets_env.env import reset
+
 from ..models.policy import build_policy_model
 from ..pipeline import Ctx, step
 from .ppo_loss import ppo_loss_from_outputs
+from .rollout import build_collect_rollout
 
 logger = logging.getLogger(__name__)
-
-
-def _sample_action(
-    policy_output: tuple,
-) -> tuple[int, float, float, float, float]:
-    """Sample action from policy outputs (single observation)."""
-    logits, p0_params, p1_params, value = policy_output
-    logits = np.asarray(logits[0])
-    p0_params = np.asarray(p0_params[0])
-    p1_params = np.asarray(p1_params[0])
-    value_f = float(np.asarray(value[0, 0]))
-
-    # Categorical sample for action_type
-    probs = _softmax(logits)
-    action_type = int(np.random.choice(len(probs), p=probs))
-
-    # Gaussian sample for p0 (clipped to [0, 1])
-    p0_mean, p0_log_std = float(p0_params[0]), float(p0_params[1])
-    p0_std = np.exp(np.clip(p0_log_std, -5.0, 2.0))
-    p0_raw = np.random.normal(p0_mean, p0_std)
-    p0 = float(np.clip(p0_raw, 0.0, 1.0))
-
-    # Gaussian sample for p1 (clipped to [-1, 1])
-    p1_mean, p1_log_std = float(p1_params[0]), float(p1_params[1])
-    p1_std = np.exp(np.clip(p1_log_std, -5.0, 2.0))
-    p1_raw = np.random.normal(p1_mean, p1_std)
-    p1 = float(np.clip(p1_raw, -1.0, 1.0))
-
-    # Combined log probability
-    log_prob = (
-        np.log(probs[action_type] + 1e-8)
-        + _gaussian_log_prob(p0_raw, p0_mean, p0_std)
-        + _gaussian_log_prob(p1_raw, p1_mean, p1_std)
-    )
-    return action_type, p0, p1, float(log_prob), value_f
-
-
-def _softmax(x: np.ndarray) -> np.ndarray:
-    e = np.exp(x - np.max(x))
-    return e / e.sum()
-
-
-def _gaussian_log_prob(x: float, mean: float, std: float) -> float:
-    return float(-0.5 * ((x - mean) / std) ** 2 - np.log(std) - 0.5 * np.log(2 * np.pi))
-
-
-def _collect_rollout(
-    env, policy: keras.Model, rollout_steps: int,
-) -> dict[str, np.ndarray]:
-    """Step through env, collect transitions for PPO."""
-    n = rollout_steps
-    bufs = {
-        "obs": np.empty((n, env.obs_dim), np.float32),
-        "action_types": np.empty(n, np.int32),
-        "p0s": np.empty(n, np.float32), "p1s": np.empty(n, np.float32),
-        "rewards": np.empty(n, np.float32), "dones": np.empty(n, np.float32),
-        "log_probs": np.empty(n, np.float32), "values": np.empty(n, np.float32),
-    }
-    obs = env.reset()
-    for t in range(n):
-        bufs["obs"][t] = obs
-        outputs = policy(obs[np.newaxis], training=False)
-        action_type, p0, p1, log_prob, value = _sample_action(outputs)
-        obs, reward, done, _ = env.step(action_type, p0, p1)
-        bufs["action_types"][t] = action_type
-        bufs["p0s"][t], bufs["p1s"][t] = p0, p1
-        bufs["rewards"][t], bufs["dones"][t] = reward, float(done)
-        bufs["log_probs"][t], bufs["values"][t] = log_prob, value
-        if done:
-            obs = env.reset()
-    return bufs
 
 
 def _compute_gae(
@@ -107,7 +41,7 @@ def _compute_gae(
 
 @step
 def fit_rl(ctx: Ctx) -> Ctx:
-    """PPO training loop."""
+    """PPO training loop with JIT-compiled rollouts."""
     cfg = ctx["cfg"]
     rl = cfg.rl
     env = ctx["env"]
@@ -115,29 +49,52 @@ def fit_rl(ctx: Ctx) -> Ctx:
     policy = build_policy_model(env.obs_dim, cfg.backbone)
     optimizer = keras.optimizers.AdamW(learning_rate=rl.lr)
 
+    lookback = cfg.env.lookback
+    balance = cfg.env.balance
+    params = env._params
+
+    obs, state, bar_feats = reset(params, lookback=lookback, balance=balance)
+    collect = build_collect_rollout(policy, params, lookback=lookback, balance=balance)
+
     wandb.init(
         project=cfg.wandb.project, tags=list(cfg.wandb.tags),
         config=OmegaConf.to_container(cfg, resolve=True), reinit=True,
     )
 
+    rng = jax.random.PRNGKey(cfg.backbone.seed)
     total_steps = 0
     while total_steps < rl.total_timesteps:
-        rollout = _collect_rollout(env, policy, rl.rollout_steps)
+        rng, rollout_key = jax.random.split(rng)
+        trainable = [v.value for v in policy.trainable_variables]
+        non_trainable = [v.value for v in policy.non_trainable_variables]
+
+        transitions, state = collect(
+            rollout_key, trainable, non_trainable,
+            state, obs, bar_feats, jnp.int32(0), rl.rollout_steps,
+        )
+
+        # Convert to numpy for GAE + training
+        rollout = {k: np.asarray(v) for k, v in transitions.items()}
         advantages, returns = _compute_gae(
-            rollout["rewards"], rollout["values"], rollout["dones"],
+            rollout["reward"], rollout["value"], rollout["done"],
             rl.gamma, rl.gae_lambda,
         )
-        _train_on_rollout(policy, optimizer, rollout, advantages, returns, rl)
+        mean_loss = _train_on_rollout(policy, optimizer, rollout, advantages, returns, rl)
         total_steps += rl.rollout_steps
 
         wandb.log({
             "rl/total_steps": total_steps,
-            "rl/mean_reward": float(rollout["rewards"].mean()),
+            "rl/mean_reward": float(rollout["reward"].mean()),
+            "rl/loss": mean_loss,
         })
-        logger.info("Steps %d — mean_reward=%.4f", total_steps, rollout["rewards"].mean())
+        logger.info("Steps %d — reward=%.4f loss=%.4f", total_steps, rollout["reward"].mean(), mean_loss)
 
-    wandb.finish()
+    model_path = Path("outputs") / "policy.keras"
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    policy.save(str(model_path))
+
     ctx["model"] = policy
+    ctx["model_path"] = model_path
     return ctx
 
 
@@ -145,10 +102,11 @@ def _train_on_rollout(
     policy: keras.Model, optimizer: keras.Optimizer,
     rollout: dict, advantages: np.ndarray, returns: np.ndarray,
     rl_cfg,
-) -> None:
-    """Run PPO epochs + minibatch updates on one rollout."""
+) -> float:
+    """Run PPO epochs + minibatch updates on one rollout. Returns mean loss."""
     n = len(advantages)
     indices = np.arange(n)
+    losses: list[float] = []
 
     for _ in range(rl_cfg.n_epochs):
         np.random.shuffle(indices)
@@ -156,21 +114,29 @@ def _train_on_rollout(
             idx = indices[start : start + rl_cfg.batch_size]
             batch = {
                 "obs": rollout["obs"][idx],
-                "action_types": rollout["action_types"][idx],
-                "p0s": rollout["p0s"][idx],
-                "p1s": rollout["p1s"][idx],
-                "old_log_probs": rollout["log_probs"][idx],
+                "action_types": rollout["action_type"][idx],
+                "p0s": rollout["p0"][idx],
+                "p1s": rollout["p1"][idx],
+                "old_log_probs": rollout["log_prob"][idx],
                 "advantages": advantages[idx],
                 "returns": returns[idx],
             }
-            _update_step(policy, optimizer, batch, rl_cfg)
+            losses.append(_update_step(policy, optimizer, batch, rl_cfg))
+    return float(np.mean(losses))
+
+
+def _clip_grads(grads: list, max_norm: float) -> list:
+    """Global norm gradient clipping."""
+    total_norm = jnp.sqrt(sum(jnp.sum(jnp.square(g)) for g in grads))
+    clip_coef = jnp.minimum(max_norm / (total_norm + 1e-6), 1.0)
+    return [g * clip_coef for g in grads]
 
 
 def _update_step(
     policy: keras.Model, optimizer: keras.Optimizer,
     batch: dict, rl_cfg,
-) -> None:
-    """Single gradient step via stateless_call + jax.grad."""
+) -> float:
+    """Single gradient step via stateless_call + jax.grad. Returns loss."""
     trainable = policy.trainable_variables
     non_trainable = policy.non_trainable_variables
 
@@ -184,8 +150,11 @@ def _update_step(
             rl_cfg.clip_epsilon, rl_cfg.value_coeff, rl_cfg.entropy_coeff,
         )
 
-    grads = jax.grad(loss_fn)(
+    loss, grads = jax.value_and_grad(loss_fn)(
         [v.value for v in trainable],
         [v.value for v in non_trainable],
     )
+    if rl_cfg.clip_grad_norm > 0:
+        grads = _clip_grads(grads, rl_cfg.clip_grad_norm)
     optimizer.apply(grads, trainable)
+    return float(loss)

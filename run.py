@@ -29,7 +29,7 @@ from trader_keras.steps.rl import fit_rl
 
 PIPELINES = {
     "predict": [load, featurize, window, model, checkpoint, fit_supervised, save],
-    "rl":      [load, featurize, env, model, checkpoint, fit_rl, save],
+    "rl":      [load, featurize, env, fit_rl, save],
 }
 
 

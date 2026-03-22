@@ -1,22 +1,23 @@
 # @package _global_
+# Small RL config for quick testing / smoke runs.
 pipeline:
   name: rl
   skip: [load, featurize]
 
-data:
-  lookback: 30
-
 env:
   symbol: "EURUSD"
-  date_start: "2024-01-01"
-  date_end: "2024-12-31"
-  lookback: 30
+  date_start: "2025-01-01"
+  date_end: "2025-02-01"
+  lookback: 10
   balance: 10000.0
   leverage: 20.0
 
+backbone:
+  hidden_size: 32
+
 rl:
-  rollout_steps: 2048
-  n_epochs: 4
+  rollout_steps: 256
+  n_epochs: 2
   clip_epsilon: 0.2
   entropy_coeff: 0.01
   value_coeff: 0.5
@@ -24,5 +25,5 @@ rl:
   gae_lambda: 0.95
   lr: 0.0003
   batch_size: 64
-  total_timesteps: 1000000
+  total_timesteps: 2048
   clip_grad_norm: 1.0
