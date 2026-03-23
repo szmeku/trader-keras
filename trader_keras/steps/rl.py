@@ -54,6 +54,8 @@ def fit_rl(ctx: Ctx) -> Ctx:
     params = env._params
 
     obs, state, bar_feats = reset(params, lookback=lookback, balance=balance)
+    hidden = jnp.zeros(cfg.backbone.hidden_size)
+    step_idx = jnp.int32(0)
     collect = build_collect_rollout(policy, params, lookback=lookback, balance=balance)
 
     wandb.init(
@@ -68,9 +70,9 @@ def fit_rl(ctx: Ctx) -> Ctx:
         trainable = [v.value for v in policy.trainable_variables]
         non_trainable = [v.value for v in policy.non_trainable_variables]
 
-        transitions, state = collect(
+        transitions, (state, obs, hidden, step_idx) = collect(
             rollout_key, trainable, non_trainable,
-            state, obs, bar_feats, jnp.int32(0), rl.rollout_steps,
+            state, obs, bar_feats, hidden, step_idx, rl.rollout_steps,
         )
 
         # Convert to numpy for GAE + training
@@ -114,6 +116,7 @@ def _train_on_rollout(
             idx = indices[start : start + rl_cfg.batch_size]
             batch = {
                 "obs": rollout["obs"][idx],
+                "hidden": rollout["hidden"][idx],
                 "action_types": rollout["action_type"][idx],
                 "p0s": rollout["p0"][idx],
                 "p1s": rollout["p1"][idx],
@@ -142,9 +145,10 @@ def _update_step(
 
     def loss_fn(trainable_vals, non_trainable_vals):
         outputs, _ = policy.stateless_call(
-            trainable_vals, non_trainable_vals, batch["obs"], training=True,
+            trainable_vals, non_trainable_vals,
+            [batch["obs"], batch["hidden"]], training=True,
         )
-        logits, p0_params, p1_params, values = outputs
+        logits, p0_params, p1_params, values, _ = outputs
         return ppo_loss_from_outputs(
             logits, p0_params, p1_params, values, batch,
             rl_cfg.clip_epsilon, rl_cfg.value_coeff, rl_cfg.entropy_coeff,

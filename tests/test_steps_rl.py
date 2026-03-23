@@ -188,6 +188,7 @@ class TestRolloutJIT:
         te, policy = env_and_policy
         params = te._params
         obs, state, bar_feats = reset(params, lookback=10, balance=10000.0)
+        hidden = jnp.zeros(16)
         collect = build_collect_rollout(policy, params, lookback=10, balance=10000.0)
 
         trainable = [v.value for v in policy.trainable_variables]
@@ -196,10 +197,11 @@ class TestRolloutJIT:
 
         transitions, _ = collect(
             rng, trainable, non_trainable,
-            state, obs, bar_feats, jnp.int32(0), 64,
+            state, obs, bar_feats, hidden, jnp.int32(0), 64,
         )
         assert transitions["reward"].shape == (64,)
         assert transitions["obs"].shape == (64, te.obs_dim)
+        assert transitions["hidden"].shape == (64, 16)
         assert transitions["action_type"].shape == (64,)
 
     def test_rewards_finite(self, env_and_policy):
@@ -209,6 +211,7 @@ class TestRolloutJIT:
         te, policy = env_and_policy
         params = te._params
         obs, state, bar_feats = reset(params, lookback=10, balance=10000.0)
+        hidden = jnp.zeros(16)
         collect = build_collect_rollout(policy, params, lookback=10, balance=10000.0)
 
         trainable = [v.value for v in policy.trainable_variables]
@@ -217,7 +220,7 @@ class TestRolloutJIT:
 
         transitions, _ = collect(
             rng, trainable, non_trainable,
-            state, obs, bar_feats, jnp.int32(0), 64,
+            state, obs, bar_feats, hidden, jnp.int32(0), 64,
         )
         assert np.all(np.isfinite(np.asarray(transitions["reward"])))
         assert np.all(np.isfinite(np.asarray(transitions["value"])))
@@ -243,5 +246,6 @@ class TestFitRL:
 
         assert "model" in ctx
         obs = np.zeros((1, te.obs_dim), dtype=np.float32)
-        outputs = ctx["model"](obs, training=False)
-        assert len(outputs) == 4
+        hidden = np.zeros((1, 16), dtype=np.float32)
+        outputs = ctx["model"]([obs, hidden], training=False)
+        assert len(outputs) == 5  # logits, p0, p1, value, new_hidden
