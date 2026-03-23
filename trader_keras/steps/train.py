@@ -54,6 +54,20 @@ def fit_supervised(ctx: Ctx) -> Ctx:
         config=OmegaConf.to_container(cfg, resolve=True), reinit=True,
     )
 
+    n_params = model.count_params()
+    n_train = len(x_train)
+    n_features = x_train.shape[-1]
+    memo_ratio = n_train / n_params if n_params > 0 else float("inf")
+    info_ratio = (n_train * n_features) / n_params if n_params > 0 else float("inf")
+    logger.info(
+        "samples=%d, features=%d, params=%d | memo_ratio=%.2f, info_ratio=%.2f",
+        n_train, n_features, n_params, memo_ratio, info_ratio,
+    )
+    wandb.summary["n_params"] = n_params
+    wandb.summary["n_train"] = n_train
+    wandb.summary["memo_ratio"] = memo_ratio
+    wandb.summary["info_ratio"] = info_ratio
+
     val_data = (x_val, y_val) if len(x_val) else None
     monitor = "val_loss" if val_data else "loss"
 
@@ -79,7 +93,7 @@ def fit_supervised(ctx: Ctx) -> Ctx:
 
     model.fit(
         x_train, y_train, epochs=tr.epochs, batch_size=tr.batch_size,
-        validation_data=val_data, callbacks=callbacks, verbose=2, shuffle=False,
+        validation_data=val_data, callbacks=callbacks, verbose=2, shuffle=True,
     )
 
     ctx["model"] = model

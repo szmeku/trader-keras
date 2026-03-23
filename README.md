@@ -35,8 +35,8 @@ See [Hydra config groups docs](https://hydra.cc/docs/tutorials/structured_config
 | `log_high` | `log(high / prev_high)` |
 | `log_low` | `log(low / prev_low)` |
 | `log_close` | `log(close / prev_close)` |
-| `log_volume` | `log(tick_vol / prev_tick_vol)` clipped [-10, 10] |
-| `log_spread` | `spread / close` clipped [0, 0.1] |
+| `log_volume` | `log(volume / prev_volume)` clipped [-10, 10] |
+| `norm_spread` | `spread / close` clipped [0, 0.1] |
 
 ## Tests
 

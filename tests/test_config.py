@@ -5,6 +5,8 @@ import pytest
 from hydra import compose, initialize_config_dir
 from omegaconf import OmegaConf
 
+import trader_keras.config  # noqa: F401 — registers structured config
+
 
 @pytest.fixture()
 def config_dir() -> str:
@@ -22,6 +24,11 @@ class TestPredictPipeline:
     def test_default_pipeline_is_predict(self, config_dir: str) -> None:
         cfg = _compose(config_dir)
         assert cfg.pipeline.name == "predict"
+
+    def test_pipeline_has_steps(self, config_dir: str) -> None:
+        cfg = _compose(config_dir)
+        assert "load" in cfg.pipeline.steps
+        assert "fit_supervised" in cfg.pipeline.steps
 
     def test_backbone_defaults(self, config_dir: str) -> None:
         cfg = _compose(config_dir)
@@ -51,6 +58,10 @@ class TestRLPipeline:
         cfg = _compose(config_dir, ["pipeline=rl"])
         assert cfg.pipeline.name == "rl"
 
+    def test_rl_pipeline_steps(self, config_dir: str) -> None:
+        cfg = _compose(config_dir, ["pipeline=rl"])
+        assert list(cfg.pipeline.steps) == ["env", "fit_rl", "save"]
+
     def test_rl_has_env_config(self, config_dir: str) -> None:
         cfg = _compose(config_dir, ["pipeline=rl"])
         assert cfg.env.symbol == "EURUSD"
@@ -58,12 +69,8 @@ class TestRLPipeline:
 
     def test_rl_has_rl_config(self, config_dir: str) -> None:
         cfg = _compose(config_dir, ["pipeline=rl"])
-        assert cfg.rl.rollout_steps == 2048
+        assert cfg.rl.n_epochs == 4
         assert cfg.rl.gamma == pytest.approx(0.99)
-
-    def test_rl_overrides_data_lookback(self, config_dir: str) -> None:
-        cfg = _compose(config_dir, ["pipeline=rl"])
-        assert cfg.data.lookback == 30
 
 
 class TestOverrides:

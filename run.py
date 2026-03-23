@@ -20,27 +20,19 @@ from omegaconf import DictConfig
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-from trader_keras.pipeline import pipe
-from trader_keras.steps.data import load, featurize, window
-from trader_keras.steps.model import model, checkpoint
-from trader_keras.steps.train import fit_supervised, save
-from trader_keras.steps.env import env
-from trader_keras.steps.rl import fit_rl
-
-PIPELINES = {
-    "predict": [load, featurize, window, model, checkpoint, fit_supervised, save],
-    "rl":      [load, featurize, env, fit_rl, save],
-}
+import trader_keras.config  # noqa: F401 — registers structured config
+import trader_keras.steps  # noqa: F401 — registers pipeline steps
+from trader_keras.pipeline import STEPS, pipe
 
 
 @hydra.main(config_path="conf", config_name="config", version_base="1.3")
 def main(cfg: DictConfig) -> None:
-    pipeline_name = cfg.pipeline.name
     keras.utils.set_random_seed(cfg.backbone.seed)
-    pipeline = PIPELINES[pipeline_name]
+    step_names = list(cfg.pipeline.steps)
     skip = set(cfg.pipeline.get("skip", []))
-    steps = [s for s in pipeline if s.__name__ not in skip]
-    logger.info("Pipeline: %s  skip: %s", pipeline_name, skip or "(none)")
+    steps = [STEPS[name] for name in step_names if name not in skip]
+    logger.info("Pipeline: %s  steps: %s  skip: %s",
+                cfg.pipeline.name, [s.__name__ for s in steps], skip or "(none)")
     ctx = pipe({"cfg": cfg}, *steps)
     print(f"Done. Model: {ctx.get('model_path')}")
 

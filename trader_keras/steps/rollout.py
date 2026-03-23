@@ -12,30 +12,37 @@ from icmarkets_env.action import decode_action
 from icmarkets_env.env import reset, step as env_step
 
 
+def beta_params(raw_a, raw_b):
+    """Raw network output → Beta(alpha, beta) with alpha, beta > 1."""
+    return jax.nn.softplus(raw_a) + 1.0, jax.nn.softplus(raw_b) + 1.0
+
+
+def beta_log_prob(x, alpha, beta):
+    """Beta distribution log PDF."""
+    x = jnp.clip(x, 1e-6, 1.0 - 1e-6)
+    return jax.scipy.stats.beta.logpdf(x, alpha, beta)
+
+
 def _sample_action_jax(key, logits, p0_params, p1_params):
-    """Sample action in JAX (categorical + 2 gaussians). Returns action, log_prob."""
+    """Sample action: categorical + 2 Beta distributions. Returns action, log_prob."""
     k1, k2, k3 = jax.random.split(key, 3)
 
     # Categorical
     action_type = jax.random.categorical(k1, logits)
 
-    # Gaussian p0
-    p0_mean, p0_log_std = p0_params[0], p0_params[1]
-    p0_std = jnp.exp(jnp.clip(p0_log_std, -5.0, 2.0))
-    p0_raw = p0_mean + p0_std * jax.random.normal(k2)
-    p0 = jnp.clip(p0_raw, 0.0, 1.0)
+    # Beta for p0 ∈ [0, 1]
+    p0_a, p0_b = beta_params(p0_params[0], p0_params[1])
+    p0 = jnp.clip(jax.random.beta(k2, p0_a, p0_b), 1e-6, 1.0 - 1e-6)
 
-    # Gaussian p1
-    p1_mean, p1_log_std = p1_params[0], p1_params[1]
-    p1_std = jnp.exp(jnp.clip(p1_log_std, -5.0, 2.0))
-    p1_raw = p1_mean + p1_std * jax.random.normal(k3)
-    p1 = jnp.clip(p1_raw, -1.0, 1.0)
+    # Shifted Beta for p1 ∈ [-1, 1]: sample unit ∈ [0,1], then 2*unit - 1
+    p1_a, p1_b = beta_params(p1_params[0], p1_params[1])
+    p1_unit = jnp.clip(jax.random.beta(k3, p1_a, p1_b), 1e-6, 1.0 - 1e-6)
+    p1 = 2.0 * p1_unit - 1.0
 
     # Log probability
-    log_probs_cat = jax.nn.log_softmax(logits)
-    cat_lp = log_probs_cat[action_type]
-    p0_lp = -0.5 * ((p0_raw - p0_mean) / p0_std) ** 2 - jnp.log(p0_std) - 0.5 * jnp.log(2 * jnp.pi)
-    p1_lp = -0.5 * ((p1_raw - p1_mean) / p1_std) ** 2 - jnp.log(p1_std) - 0.5 * jnp.log(2 * jnp.pi)
+    cat_lp = jax.nn.log_softmax(logits)[action_type]
+    p0_lp = beta_log_prob(p0, p0_a, p0_b)
+    p1_lp = beta_log_prob(p1_unit, p1_a, p1_b) - jnp.log(2.0)
     log_prob = cat_lp + p0_lp + p1_lp
 
     return action_type, p0, p1, log_prob
@@ -91,8 +98,8 @@ def build_collect_rollout(policy, env_params, lookback, balance):
                 state, action, env_params, bar_feats,
                 step_idx, lookback=lookback, balance=balance,
             )
-            # Close-only reward: normalized PnL on trade close, else 0
-            reward = jnp.where(close_info.has_close, close_info.pnl / balance, 0.0)
+            # Close-only reward: realized balance change (includes commissions + swaps)
+            reward = jnp.where(close_info.has_close, close_info.realized_pnl / balance, 0.0)
 
             # Auto-reset on done
             reset_obs, reset_state, _ = reset(env_params, lookback=lookback, balance=balance)

@@ -43,8 +43,8 @@ def build_gru_model(
 @_register_loss
 def gaussian_nll(y_true, y_pred):
     """Gaussian NLL: penalizes both wrong mu and wrong sigma."""
-    mu, log_sigma = y_pred[..., 0], y_pred[..., 1]
-    sigma = ops.softplus(log_sigma) + 1e-6
+    mu, raw_sigma = y_pred[..., 0], y_pred[..., 1]
+    sigma = ops.softplus(raw_sigma) + 1e-6
     return ops.mean(ops.square(y_true - mu) / ops.square(sigma) + 2.0 * ops.log(sigma))
 
 gaussian_nll.n_out = 2

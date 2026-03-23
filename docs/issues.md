@@ -13,6 +13,10 @@
 
 # Issues
 
+## 2026-03-23 — Code Review Fixes
+
+- [ ] **`TradingEnv._params` should be public** — `rl.py` accesses `env._params` to pass `EnvParams` into the JIT rollout (which needs `.spec`, `.closes`, `.spreads` and the full object for `reset()`/`step()`). Fix in `icmarkets_env`: add a `params` property to `TradingEnv`.
+
 ## 2026-03-19 — Deep Code Audit
 
 ### 📏 File Size Violations (CLAUDE.md: 150–200 lines max)

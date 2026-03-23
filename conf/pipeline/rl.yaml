@@ -1,21 +1,18 @@
 # @package _global_
 pipeline:
   name: rl
-  skip: [load, featurize]
-
-data:
-  lookback: 30
+  steps: [env, fit_rl, save]
+  skip: []
 
 env:
   symbol: "EURUSD"
   date_start: "2024-01-01"
   date_end: "2024-12-31"
-  lookback: 30
+  lookback: 1          # streaming GRU — one bar at a time, hidden carries context
   balance: 10000.0
   leverage: 20.0
 
 rl:
-  rollout_steps: 2048
   n_epochs: 4
   clip_epsilon: 0.2
   entropy_coeff: 0.01
@@ -23,6 +20,4 @@ rl:
   gamma: 0.99
   gae_lambda: 0.95
   lr: 0.0003
-  batch_size: 64
-  total_timesteps: 1000000
   clip_grad_norm: 1.0

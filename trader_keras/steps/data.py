@@ -44,7 +44,7 @@ def featurize(ctx: Ctx) -> Ctx:
 def window(ctx: Ctx) -> Ctx:
     """Create targets, sliding windows, train/val split."""
     cfg = ctx["cfg"]
-    df, target_cols = create_targets(ctx["bars"].copy(), cfg.train.horizons)
+    df, target_cols = create_targets(ctx["bars"], cfg.train.horizons)
 
     feature_cols = [c for c in FEATURE_COLS if c in df.columns]
     x_seqs, y_seqs = _make_sequences(

@@ -9,13 +9,13 @@ import pytest
 from omegaconf import OmegaConf
 
 
-def _cfg(hidden_size: int = 32):
-    return OmegaConf.create({"hidden_size": hidden_size})
+def _cfg(hidden_size: int = 32, num_layers: int = 2):
+    return OmegaConf.create({"hidden_size": hidden_size, "num_layers": num_layers})
 
 
-def _call(model, obs, hidden_size, batch_size):
+def _call(model, obs, hidden_size, batch_size, num_layers=2):
     """Helper: call model with obs + zero hidden state."""
-    hidden = np.zeros((batch_size, hidden_size), dtype=np.float32)
+    hidden = np.zeros((batch_size, num_layers, hidden_size), dtype=np.float32)
     return model([obs, hidden], training=False)
 
 
@@ -31,7 +31,7 @@ class TestBuildPolicyModel:
         assert p0.shape == (4, 2)
         assert p1.shape == (4, 2)
         assert value.shape == (4, 1)
-        assert new_h.shape == (4, 32)
+        assert new_h.shape == (4, 2, 32)
 
     def test_different_obs_dims(self):
         from trader_keras.models.policy import build_policy_model
@@ -51,7 +51,7 @@ class TestBuildPolicyModel:
             batch = np.zeros((2, 36), dtype=np.float32)
             outputs = _call(model, batch, hs, 2)
             assert len(outputs) == 5
-            assert outputs[4].shape == (2, hs)  # new_hidden
+            assert outputs[4].shape == (2, 2, hs)  # new_hidden: (batch, num_layers, hidden_size)
 
     def test_gradients_flow(self):
         from trader_keras.models.policy import build_policy_model
@@ -81,4 +81,4 @@ class TestBuildPolicyModel:
         logits, p0, p1, value, new_h = _call(model, batch, 32, 1)
         assert logits.shape == (1, 6)
         assert value.shape == (1, 1)
-        assert new_h.shape == (1, 32)
+        assert new_h.shape == (1, 2, 32)

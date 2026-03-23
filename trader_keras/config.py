@@ -1,7 +1,15 @@
-"""Configuration — plain dataclasses for OmegaConf/Hydra."""
-from __future__ import annotations
-
+"""Configuration — Hydra structured configs with type validation."""
 from dataclasses import dataclass, field
+from typing import Optional
+
+from hydra.core.config_store import ConfigStore
+
+
+@dataclass
+class PipelineConfig:
+    name: str = "predict"
+    steps: list[str] = field(default_factory=list)
+    skip: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -32,7 +40,6 @@ class DataConfig:
     load_limit: int = 0
     lookback: int = 60
     stride: int = 1
-    bar_seconds: int = 60
 
 
 @dataclass
@@ -43,7 +50,6 @@ class WandbConfig:
 
 @dataclass
 class RLConfig:
-    rollout_steps: int = 2048
     n_epochs: int = 4
     clip_epsilon: float = 0.2
     entropy_coeff: float = 0.01
@@ -51,8 +57,6 @@ class RLConfig:
     gamma: float = 0.99
     gae_lambda: float = 0.95
     lr: float = 3e-4
-    batch_size: int = 64
-    total_timesteps: int = 1_000_000
     clip_grad_norm: float = 1.0
 
 
@@ -68,9 +72,14 @@ class EnvConfig:
 
 @dataclass
 class Config:
+    pipeline: PipelineConfig = field(default_factory=PipelineConfig)
     backbone: BackboneConfig = field(default_factory=BackboneConfig)
     data: DataConfig = field(default_factory=DataConfig)
     wandb: WandbConfig = field(default_factory=WandbConfig)
-    train: TrainConfig | None = None
-    rl: RLConfig | None = None
-    env: EnvConfig | None = None
+    train: Optional[TrainConfig] = None
+    rl: Optional[RLConfig] = None
+    env: Optional[EnvConfig] = None
+
+
+cs = ConfigStore.instance()
+cs.store(name="base_config", node=Config)

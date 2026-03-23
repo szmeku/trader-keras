@@ -30,6 +30,7 @@ Don't ignore any of the points in this whole document please.
 - Prefer libraries over hand-rolled solutions; check existing deps before adding new ones
 - Stick to existing naming conventions unless you have a better one — ask before changing
 - Follow TDD: always write failing test first, then minimal code to make it pass, then refactor. Write small, focused unit tests; sanity-check on small data before scaling
+- **Config ↔ model sync** — every field in a config dataclass must be consumed by the corresponding builder; every builder param must come from config. When adding a config field, grep all builders that receive that config and wire it in. When writing a new builder, check every field on the config it receives.
 - Non-trivial architecture decisions go in `DECISIONS.md`: Context, Options, Decision, Reasoning
 
 ## CLI

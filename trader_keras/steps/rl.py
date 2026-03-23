@@ -1,4 +1,4 @@
-"""RL pipeline step: PPO training loop with JIT-compiled rollouts."""
+"""RL pipeline step: PPO training with BPTT through full sequence."""
 from __future__ import annotations
 
 import logging
@@ -41,7 +41,7 @@ def _compute_gae(
 
 @step
 def fit_rl(ctx: Ctx) -> Ctx:
-    """PPO training loop with JIT-compiled rollouts."""
+    """PPO training: each epoch = full sequential pass through the env."""
     cfg = ctx["cfg"]
     rl = cfg.rl
     env = ctx["env"]
@@ -51,11 +51,12 @@ def fit_rl(ctx: Ctx) -> Ctx:
 
     lookback = cfg.env.lookback
     balance = cfg.env.balance
-    params = env._params
+    params = env.params
+    n_steps = env.n_bars
+    hidden_size = cfg.backbone.hidden_size
+    num_layers = cfg.backbone.num_layers
+    hidden_shape = (num_layers, hidden_size)
 
-    obs, state, bar_feats = reset(params, lookback=lookback, balance=balance)
-    hidden = jnp.zeros(cfg.backbone.hidden_size)
-    step_idx = jnp.int32(0)
     collect = build_collect_rollout(policy, params, lookback=lookback, balance=balance)
 
     wandb.init(
@@ -63,33 +64,55 @@ def fit_rl(ctx: Ctx) -> Ctx:
         config=OmegaConf.to_container(cfg, resolve=True), reinit=True,
     )
 
+    n_params = policy.count_params()
+    obs_dim = env.obs_dim
+    memo_ratio = n_steps / n_params if n_params > 0 else float("inf")
+    info_ratio = (n_steps * obs_dim) / n_params if n_params > 0 else float("inf")
+    logger.info(
+        "steps=%d, obs_dim=%d, params=%d | memo_ratio=%.2f, info_ratio=%.2f",
+        n_steps, obs_dim, n_params, memo_ratio, info_ratio,
+    )
+    wandb.summary["n_params"] = n_params
+    wandb.summary["n_train"] = n_steps
+    wandb.summary["memo_ratio"] = memo_ratio
+    wandb.summary["info_ratio"] = info_ratio
+
     rng = jax.random.PRNGKey(cfg.backbone.seed)
-    total_steps = 0
-    while total_steps < rl.total_timesteps:
+    for epoch in range(rl.n_epochs):
+        obs, state, bar_feats = reset(params, lookback=lookback, balance=balance)
+        hidden = jnp.zeros(hidden_shape)
+
         rng, rollout_key = jax.random.split(rng)
         trainable = [v.value for v in policy.trainable_variables]
         non_trainable = [v.value for v in policy.non_trainable_variables]
 
-        transitions, (state, obs, hidden, step_idx) = collect(
+        transitions, _ = collect(
             rollout_key, trainable, non_trainable,
-            state, obs, bar_feats, hidden, step_idx, rl.rollout_steps,
+            state, obs, bar_feats, hidden, jnp.int32(0), n_steps,
         )
 
-        # Convert to numpy for GAE + training
         rollout = {k: np.asarray(v) for k, v in transitions.items()}
+
+        # Diagnostics: what is the agent actually doing?
+        acts = rollout["action_type"]
+        act_names = ["HOLD", "LIM_BUY", "LIM_SELL", "STP_BUY", "STP_SELL", "CANCEL"]
+        act_counts = " ".join(f"{act_names[i]}={int((acts==i).sum())}" for i in range(6))
+        n_closes = int((rollout["reward"] != 0).sum())
+        n_nonzero_reward = float(rollout["reward"][rollout["reward"] != 0].sum()) if n_closes else 0.0
         advantages, returns = _compute_gae(
             rollout["reward"], rollout["value"], rollout["done"],
             rl.gamma, rl.gae_lambda,
         )
-        mean_loss = _train_on_rollout(policy, optimizer, rollout, advantages, returns, rl)
-        total_steps += rl.rollout_steps
+
+        loss = _train_bptt(policy, optimizer, rollout, advantages, returns, rl, hidden_shape)
 
         wandb.log({
-            "rl/total_steps": total_steps,
+            "rl/epoch": epoch,
             "rl/mean_reward": float(rollout["reward"].mean()),
-            "rl/loss": mean_loss,
+            "rl/loss": loss,
         })
-        logger.info("Steps %d — reward=%.4f loss=%.4f", total_steps, rollout["reward"].mean(), mean_loss)
+        logger.info("Epoch %d — reward=%.4f loss=%.4f | %s | closes=%d",
+                    epoch, rollout["reward"].mean(), loss, act_counts, n_closes)
 
     model_path = Path("outputs") / "policy.keras"
     model_path.parent.mkdir(parents=True, exist_ok=True)
@@ -100,55 +123,38 @@ def fit_rl(ctx: Ctx) -> Ctx:
     return ctx
 
 
-def _train_on_rollout(
+def _train_bptt(
     policy: keras.Model, optimizer: keras.Optimizer,
     rollout: dict, advantages: np.ndarray, returns: np.ndarray,
-    rl_cfg,
+    rl_cfg, hidden_shape: tuple[int, ...],
 ) -> float:
-    """Run PPO epochs + minibatch updates on one rollout. Returns mean loss."""
-    n = len(advantages)
-    indices = np.arange(n)
-    losses: list[float] = []
-
-    for _ in range(rl_cfg.n_epochs):
-        np.random.shuffle(indices)
-        for start in range(0, n, rl_cfg.batch_size):
-            idx = indices[start : start + rl_cfg.batch_size]
-            batch = {
-                "obs": rollout["obs"][idx],
-                "hidden": rollout["hidden"][idx],
-                "action_types": rollout["action_type"][idx],
-                "p0s": rollout["p0"][idx],
-                "p1s": rollout["p1"][idx],
-                "old_log_probs": rollout["log_prob"][idx],
-                "advantages": advantages[idx],
-                "returns": returns[idx],
-            }
-            losses.append(_update_step(policy, optimizer, batch, rl_cfg))
-    return float(np.mean(losses))
-
-
-def _clip_grads(grads: list, max_norm: float) -> list:
-    """Global norm gradient clipping."""
-    total_norm = jnp.sqrt(sum(jnp.sum(jnp.square(g)) for g in grads))
-    clip_coef = jnp.minimum(max_norm / (total_norm + 1e-6), 1.0)
-    return [g * clip_coef for g in grads]
-
-
-def _update_step(
-    policy: keras.Model, optimizer: keras.Optimizer,
-    batch: dict, rl_cfg,
-) -> float:
-    """Single gradient step via stateless_call + jax.grad. Returns loss."""
+    """Single BPTT gradient step: re-run GRU forward, backprop through time."""
     trainable = policy.trainable_variables
     non_trainable = policy.non_trainable_variables
 
+    obs_seq = jnp.array(rollout["obs"])
+    batch = {
+        "action_types": jnp.array(rollout["action_type"]),
+        "p0s": jnp.array(rollout["p0"]),
+        "p1s": jnp.array(rollout["p1"]),
+        "old_log_probs": jnp.array(rollout["log_prob"]),
+        "advantages": jnp.array(advantages),
+        "returns": jnp.array(returns),
+    }
+
     def loss_fn(trainable_vals, non_trainable_vals):
-        outputs, _ = policy.stateless_call(
-            trainable_vals, non_trainable_vals,
-            [batch["obs"], batch["hidden"]], training=True,
+        def scan_step(hidden, obs_t):
+            outputs, _ = policy.stateless_call(
+                trainable_vals, non_trainable_vals,
+                [obs_t[jnp.newaxis], hidden[jnp.newaxis]], training=True,
+            )
+            logits, p0_params, p1_params, value, new_hidden = outputs
+            return new_hidden[0], (logits[0], p0_params[0], p1_params[0], value[0])
+
+        init_hidden = jnp.zeros(hidden_shape)
+        _, (logits, p0_params, p1_params, values) = jax.lax.scan(
+            scan_step, init_hidden, obs_seq,
         )
-        logits, p0_params, p1_params, values, _ = outputs
         return ppo_loss_from_outputs(
             logits, p0_params, p1_params, values, batch,
             rl_cfg.clip_epsilon, rl_cfg.value_coeff, rl_cfg.entropy_coeff,
@@ -162,3 +168,10 @@ def _update_step(
         grads = _clip_grads(grads, rl_cfg.clip_grad_norm)
     optimizer.apply(grads, trainable)
     return float(loss)
+
+
+def _clip_grads(grads: list, max_norm: float) -> list:
+    """Global norm gradient clipping."""
+    total_norm = jnp.sqrt(sum(jnp.sum(jnp.square(g)) for g in grads))
+    clip_coef = jnp.minimum(max_norm / (total_norm + 1e-6), 1.0)
+    return [g * clip_coef for g in grads]

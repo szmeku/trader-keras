@@ -40,10 +40,9 @@ class FakeEnv:
 
 def _rl_cfg():
     return OmegaConf.create({
-        "backbone": {"hidden_size": 16, "seed": 42},
+        "backbone": {"hidden_size": 16, "num_layers": 2, "seed": 42},
         "env": {"lookback": 10, "balance": 10000.0},
         "rl": {
-            "rollout_steps": 32,
             "n_epochs": 2,
             "clip_epsilon": 0.2,
             "entropy_coeff": 0.01,
@@ -51,8 +50,6 @@ def _rl_cfg():
             "gamma": 0.99,
             "gae_lambda": 0.95,
             "lr": 3e-4,
-            "batch_size": 16,
-            "total_timesteps": 64,
             "clip_grad_norm": 1.0,
         },
         "wandb": {"project": "test", "tags": []},
@@ -103,8 +100,8 @@ class TestSampleActionJax:
 
         key = jax.random.PRNGKey(0)
         logits = jnp.zeros(6)
-        p0_params = jnp.array([0.5, 0.0])
-        p1_params = jnp.array([0.0, -1.0])
+        p0_params = jnp.array([0.5, 0.5])  # Beta params (raw_alpha, raw_beta)
+        p1_params = jnp.array([0.0, 0.0])
 
         action_type, p0, p1, log_prob = _sample_action_jax(key, logits, p0_params, p1_params)
         assert 0 <= int(action_type) < 6
@@ -116,7 +113,7 @@ class TestSampleActionJax:
         from trader_keras.steps.rollout import _sample_action_jax
 
         logits = jnp.zeros(6)
-        p0_params = jnp.array([0.5, 0.0])
+        p0_params = jnp.array([0.5, 0.5])
         p1_params = jnp.array([0.0, 0.0])
 
         actions = set()
@@ -127,19 +124,20 @@ class TestSampleActionJax:
         assert len(actions) > 1  # not all the same
 
 
-class TestGaussianLogProb:
+class TestBetaLogProb:
     def test_matches_scipy(self):
-        from scipy.stats import norm
-        from trader_keras.steps.ppo_loss import gaussian_log_prob
+        from scipy.stats import beta as scipy_beta
 
-        x, mean, log_std = 0.5, 0.3, -1.0
-        std = np.exp(np.clip(log_std, -5.0, 2.0))
+        from trader_keras.steps.ppo_loss import _beta_log_prob, _beta_params
 
-        result = float(gaussian_log_prob(
-            np.array([x]), np.array([mean]), np.array([log_std]),
-        )[0])
-        expected = norm.logpdf(x, loc=mean, scale=std)
-        np.testing.assert_allclose(result, expected, rtol=1e-5)
+        raw = np.array([[0.5, -0.3]], dtype=np.float32)
+        alpha, beta = _beta_params(raw)
+        alpha_f, beta_f = float(alpha[0]), float(beta[0])
+
+        x = 0.4
+        result = float(_beta_log_prob(np.array([x]), alpha, beta)[0])
+        expected = float(scipy_beta.logpdf(x, alpha_f, beta_f))
+        np.testing.assert_allclose(result, expected, rtol=1e-4)
 
 
 class TestClipGrads:
@@ -176,7 +174,7 @@ class TestRolloutJIT:
             te = TradingEnv.from_symbol("EURUSD", "2025-01-01", "2025-01-03", lookback=10)
         except (FileNotFoundError, Exception):
             pytest.skip("EURUSD data not available")
-        cfg = OmegaConf.create({"hidden_size": 16})
+        cfg = OmegaConf.create({"hidden_size": 16, "num_layers": 2})
         from trader_keras.models.policy import build_policy_model
         policy = build_policy_model(te.obs_dim, cfg)
         return te, policy
@@ -188,7 +186,7 @@ class TestRolloutJIT:
         te, policy = env_and_policy
         params = te._params
         obs, state, bar_feats = reset(params, lookback=10, balance=10000.0)
-        hidden = jnp.zeros(16)
+        hidden = jnp.zeros((2, 16))
         collect = build_collect_rollout(policy, params, lookback=10, balance=10000.0)
 
         trainable = [v.value for v in policy.trainable_variables]
@@ -201,7 +199,7 @@ class TestRolloutJIT:
         )
         assert transitions["reward"].shape == (64,)
         assert transitions["obs"].shape == (64, te.obs_dim)
-        assert transitions["hidden"].shape == (64, 16)
+        assert transitions["hidden"].shape == (64, 2, 16)
         assert transitions["action_type"].shape == (64,)
 
     def test_rewards_finite(self, env_and_policy):
@@ -211,7 +209,7 @@ class TestRolloutJIT:
         te, policy = env_and_policy
         params = te._params
         obs, state, bar_feats = reset(params, lookback=10, balance=10000.0)
-        hidden = jnp.zeros(16)
+        hidden = jnp.zeros((2, 16))
         collect = build_collect_rollout(policy, params, lookback=10, balance=10000.0)
 
         trainable = [v.value for v in policy.trainable_variables]
@@ -228,7 +226,7 @@ class TestRolloutJIT:
 
 
 class TestFitRL:
-    """Integration test with FakeEnv — uses Python fallback path."""
+    """Integration test with real env (skip if no data)."""
 
     def test_produces_model_in_ctx(self):
         """fit_rl with real env (skip if no data)."""
@@ -246,6 +244,6 @@ class TestFitRL:
 
         assert "model" in ctx
         obs = np.zeros((1, te.obs_dim), dtype=np.float32)
-        hidden = np.zeros((1, 16), dtype=np.float32)
+        hidden = np.zeros((1, 2, 16), dtype=np.float32)
         outputs = ctx["model"]([obs, hidden], training=False)
         assert len(outputs) == 5  # logits, p0, p1, value, new_hidden

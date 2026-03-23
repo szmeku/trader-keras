@@ -1,7 +1,7 @@
-"""PPO loss computation and Gaussian log-probability helpers."""
+"""PPO loss computation with Beta-distribution continuous actions."""
 from __future__ import annotations
 
-import numpy as np
+import jax.scipy.special
 from keras import ops
 
 
@@ -19,9 +19,13 @@ def ppo_loss_from_outputs(
     )
     action_log_probs = ops.squeeze(action_log_probs, axis=-1)
 
-    # Gaussian log probs for p0 and p1
-    p0_lp = gaussian_log_prob(batch["p0s"], p0_params[:, 0], p0_params[:, 1])
-    p1_lp = gaussian_log_prob(batch["p1s"], p1_params[:, 0], p1_params[:, 1])
+    # Beta log probs for p0 ∈ [0,1] and p1 ∈ [-1,1]
+    p0_a, p0_b = _beta_params(p0_params)
+    p1_a, p1_b = _beta_params(p1_params)
+
+    p0_lp = _beta_log_prob(batch["p0s"], p0_a, p0_b)
+    p1_unit = (batch["p1s"] + 1.0) / 2.0  # map [-1,1] → [0,1]
+    p1_lp = _beta_log_prob(p1_unit, p1_a, p1_b) - ops.log(2.0)
 
     new_log_probs = action_log_probs + p0_lp + p1_lp
 
@@ -36,23 +40,38 @@ def ppo_loss_from_outputs(
     # Value loss
     value_loss = ops.mean(ops.square(values - batch["returns"]))
 
-    # Entropy bonus (categorical + Gaussian)
+    # Entropy: categorical + Beta
     probs = ops.softmax(logits)
     cat_entropy = -ops.mean(ops.sum(probs * log_probs_cat, axis=-1))
-
-    # Gaussian entropy: 0.5 * ln(2*pi*e*std^2) = 0.5 + ln(std) + 0.5*ln(2*pi)
-    p0_std = ops.exp(ops.clip(p0_params[:, 1], -5.0, 2.0))
-    p1_std = ops.exp(ops.clip(p1_params[:, 1], -5.0, 2.0))
-    gauss_entropy = ops.mean(
-        0.5 + ops.log(p0_std) + 0.5 * np.log(2 * np.pi)
-        + 0.5 + ops.log(p1_std) + 0.5 * np.log(2 * np.pi)
-    )
-    entropy = cat_entropy + gauss_entropy
+    beta_ent = ops.mean(_beta_entropy(p0_a, p0_b) + _beta_entropy(p1_a, p1_b) + ops.log(2.0))
+    entropy = cat_entropy + beta_ent
 
     return policy_loss + value_coeff * value_loss - entropy_coeff * entropy
 
 
-def gaussian_log_prob(x, mean, log_std):
-    """Gaussian log-probability. Takes log_std (clipped to [-5, 2])."""
-    std = ops.exp(ops.clip(log_std, -5.0, 2.0))
-    return -0.5 * ops.square((x - mean) / std) - ops.log(std) - 0.5 * np.log(2 * np.pi)
+def _beta_params(raw):
+    """Raw network output → Beta(alpha, beta) with alpha, beta > 1."""
+    return ops.softplus(raw[:, 0]) + 1.0, ops.softplus(raw[:, 1]) + 1.0
+
+
+def _betaln(a, b):
+    """Log Beta function: log B(a,b) = lgamma(a) + lgamma(b) - lgamma(a+b)."""
+    lgamma = jax.scipy.special.gammaln
+    return lgamma(a) + lgamma(b) - lgamma(a + b)
+
+
+def _beta_log_prob(x, alpha, beta):
+    """Beta distribution log PDF."""
+    x = ops.clip(x, 1e-6, 1.0 - 1e-6)
+    return (alpha - 1) * ops.log(x) + (beta - 1) * ops.log(1 - x) - _betaln(alpha, beta)
+
+
+def _beta_entropy(alpha, beta):
+    """Differential entropy of Beta(alpha, beta)."""
+    digamma = jax.scipy.special.digamma
+    return (
+        _betaln(alpha, beta)
+        - (alpha - 1) * digamma(alpha)
+        - (beta - 1) * digamma(beta)
+        + (alpha + beta - 2) * digamma(alpha + beta)
+    )

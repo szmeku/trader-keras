@@ -2,6 +2,7 @@
 # Benchmark config — matching trader-t5x for throughput comparison
 pipeline:
   name: predict
+  steps: [load, featurize, window, model, checkpoint, fit_supervised, save]
   skip: []
 
 data:
