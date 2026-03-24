@@ -48,14 +48,18 @@ def _sample_action_jax(key, logits, p0_params, p1_params):
     return action_type, p0, p1, log_prob
 
 
-def build_collect_rollout(policy, env_params, lookback, balance):
+def build_collect_rollout(policy, env_params, lookback, balance, reward_fn=None):
     """Build a JIT-compiled rollout function for the given policy and env.
 
-    Returns a function: (rng_key, trainable_vars, non_trainable_vars, init_state,
-                          init_obs, bar_feats, init_hidden, start_idx, n_steps)
-                      -> (transitions, (final_state, final_obs, final_hidden, final_idx))
+    Args:
+        reward_fn: (raw_reward, close_info, balance) -> scalar. Built from config
+                   before JIT so string dispatch doesn't affect compilation.
     """
     spec = env_params.spec
+    if reward_fn is None:
+        from .reward import build_reward_fn
+        from types import SimpleNamespace
+        reward_fn = build_reward_fn(SimpleNamespace(type="pbrs", alpha=1.0))
 
     def _collect(rng_key, trainable_vars, non_trainable_vars,
                  init_state, init_obs, bar_feats, init_hidden, start_idx, n_steps):
@@ -98,8 +102,7 @@ def build_collect_rollout(policy, env_params, lookback, balance):
                 state, action, env_params, bar_feats,
                 step_idx, lookback=lookback, balance=balance,
             )
-            # Close-only reward: realized balance change (includes commissions + swaps)
-            reward = jnp.where(close_info.has_close, close_info.realized_pnl / balance, 0.0)
+            reward = reward_fn(raw_reward, close_info, balance)
 
             # Auto-reset on done
             reset_obs, reset_state, _ = reset(env_params, lookback=lookback, balance=balance)

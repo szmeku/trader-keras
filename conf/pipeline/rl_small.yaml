@@ -18,13 +18,15 @@ backbone:
   hidden_size: 40
 
 rl:
-  n_epochs: 20         # full sequential passes over the date range
+  n_epochs: 8         #full sequential passes over the date range
   clip_epsilon: 0.2
-  entropy_coeff: 0.0001
+  entropy_coeff: 0.0000001
   value_coeff: 0.5
-  gamma: 0.99
+  gamma: 0.95
   gae_lambda: 0.95
-  lr: 0.0003
+  lr: 0.001
   clip_grad_norm: 1.0
-  # removed: rollout_steps, batch_size, total_timesteps
-  # — date range determines sequence length, no shuffled minibatches
+  tbptt_chunk: 256
+  reward:
+    type: pbrs
+    alpha: 1.0

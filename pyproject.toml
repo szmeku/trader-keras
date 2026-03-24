@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "trader-keras"
 version = "0.1.0"
 description = "Crypto trading predictor using Keras 3 + JAX backend"
-requires-python = ">=3.13"
+requires-python = ">=3.12"
 dependencies = [
     # Keras3 with JAX GPU backend
     "keras>=3.0",
@@ -23,10 +23,15 @@ dependencies = [
     "tqdm>=4.66",
     "icmarkets-env",
     "vastai>=0.2.8",
+    "optree>=0.19.0",
+    "optax>=0.2.0",
+    "tensorflow>=2.21.0",
+    "onnx>=1.15",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "mypy>=1.8"]
+export = ["onnxruntime"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["trader_keras"]

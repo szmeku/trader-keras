@@ -21,3 +21,7 @@ rl:
   gae_lambda: 0.95
   lr: 0.0003
   clip_grad_norm: 1.0
+  tbptt_chunk: 256
+  reward:
+    type: pbrs
+    alpha: 1.0

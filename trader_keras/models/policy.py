@@ -18,6 +18,21 @@ from keras import layers
 N_ACTION_TYPES = 6
 
 
+@keras.saving.register_keras_serializable()
+class HiddenSlice(layers.Layer):
+    """Slice one layer's hidden state from stacked GRU hidden: h[:, idx, :]."""
+
+    def __init__(self, index: int, **kwargs: object) -> None:
+        super().__init__(**kwargs)
+        self.index = index
+
+    def call(self, x: keras.KerasTensor) -> keras.KerasTensor:
+        return x[:, self.index, :]
+
+    def get_config(self) -> dict:
+        return {**super().get_config(), "index": self.index}
+
+
 def build_policy_model(obs_dim: int, cfg) -> keras.Model:
     """Build actor-critic GRU for the trading environment.
 
@@ -32,7 +47,7 @@ def build_policy_model(obs_dim: int, cfg) -> keras.Model:
     x = layers.Reshape((1, obs_dim))(obs_input)
     new_hiddens = []
     for i in range(num_layers):
-        h_i = layers.Lambda(lambda h, idx=i: h[:, idx, :], name=f"h_slice_{i}")(h_input)
+        h_i = HiddenSlice(i, name=f"h_slice_{i}")(h_input)
         gru = layers.GRU(hidden_size, return_state=True, name=f"gru_{i}")
         x, new_h = gru(x, initial_state=h_i)
         new_hiddens.append(new_h)

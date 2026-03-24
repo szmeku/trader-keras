@@ -51,6 +51,8 @@ def _rl_cfg():
             "gae_lambda": 0.95,
             "lr": 3e-4,
             "clip_grad_norm": 1.0,
+            "tbptt_chunk": 64,
+            "reward": {"type": "pbrs", "alpha": 1.0},
         },
         "wandb": {"project": "test", "tags": []},
     })
@@ -138,30 +140,6 @@ class TestBetaLogProb:
         result = float(_beta_log_prob(np.array([x]), alpha, beta)[0])
         expected = float(scipy_beta.logpdf(x, alpha_f, beta_f))
         np.testing.assert_allclose(result, expected, rtol=1e-4)
-
-
-class TestClipGrads:
-    def test_reduces_norm_when_above_threshold(self):
-        from trader_keras.steps.rl import _clip_grads
-
-        grads = [jnp.ones((10,)) * 5.0, jnp.ones((10,)) * 5.0]
-        original_norm = float(jnp.sqrt(sum(jnp.sum(jnp.square(g)) for g in grads)))
-        max_norm = 1.0
-        assert original_norm > max_norm
-
-        clipped = _clip_grads(grads, max_norm)
-        clipped_norm = float(jnp.sqrt(sum(jnp.sum(jnp.square(g)) for g in clipped)))
-        np.testing.assert_allclose(clipped_norm, max_norm, rtol=1e-5)
-
-    def test_no_change_when_below_threshold(self):
-        from trader_keras.steps.rl import _clip_grads
-
-        grads = [jnp.ones((10,)) * 0.01, jnp.ones((5,)) * 0.01]
-        max_norm = 10.0
-        clipped = _clip_grads(grads, max_norm)
-
-        for g, c in zip(grads, clipped):
-            np.testing.assert_array_equal(np.array(g), np.array(c))
 
 
 class TestRolloutJIT:

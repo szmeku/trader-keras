@@ -27,7 +27,7 @@ Don't ignore any of the points in this whole document please.
 - **Single source of truth** — never repeat the same information in multiple places
 - **Functional style** when it doesn't add overhead — composability, straight-forward flows
 - **Strict typing everywhere** — run `mypy` / `pyright`
-- Prefer libraries over hand-rolled solutions; check existing deps before adding new ones
+- **Prefer libraries over hand-rolled solutions** — dependency size doesn't matter; custom code size does. A large well-maintained library is always better than a small hand-rolled equivalent. Check existing deps before adding new ones.
 - Stick to existing naming conventions unless you have a better one — ask before changing
 - Follow TDD: always write failing test first, then minimal code to make it pass, then refactor. Write small, focused unit tests; sanity-check on small data before scaling
 - **Config ↔ model sync** — every field in a config dataclass must be consumed by the corresponding builder; every builder param must come from config. When adding a config field, grep all builders that receive that config and wire it in. When writing a new builder, check every field on the config it receives.
@@ -47,7 +47,7 @@ Don't ignore any of the points in this whole document please.
 | Environment | `.venv` + alias `u` = `uv run` |
 | Venv path | `~/projects/trader-keras/.venv` |
 | Data path | `~/projects/data` |
-| Backend | Keras 3 + JAX (no TensorFlow) |
+| Backend | Keras 3 + JAX |
 
 - All agents must use `uv` for dependency management
 - Current focus: Stage 1 (GRU predictor) and data pipeline

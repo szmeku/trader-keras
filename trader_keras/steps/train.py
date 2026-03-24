@@ -103,8 +103,30 @@ def fit_supervised(ctx: Ctx) -> Ctx:
 
 @step
 def save(ctx: Ctx) -> Ctx:
-    """Finalize training run: call wandb.finish()."""
-    model_path = ctx["model_path"]
+    """Save model to Hydra run dir, optionally export ONNX + MT5 settings."""
+    import hydra.core.hydra_config
+
+    cfg = ctx["cfg"]
+    run_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
+
+    model_path = run_dir / "policy.keras"
+    ctx["model"].save(str(model_path))
+    ctx["model_path"] = model_path
+    logger.info("Saved model to %s", model_path)
+
+    if cfg.save.export_onnx:
+        _export_onnx(ctx["model"], run_dir, cfg)
+
     wandb.finish()
-    logger.info("Training complete. Model at %s", model_path)
     return ctx
+
+
+def _export_onnx(model: keras.Model, run_dir: Path, cfg: object) -> None:
+    """Export ONNX model into run dir."""
+    from icmarkets_env.onnx.export import export_policy_onnx
+
+    obs_dim = model.input_shape[0][-1]
+    hidden_shape = model.input_shape[1][1:]
+
+    onnx_path = export_policy_onnx(model, run_dir / "policy.onnx", obs_dim, hidden_shape)
+    logger.info("Exported ONNX: %s (%.0f KB)", onnx_path, onnx_path.stat().st_size / 1024)

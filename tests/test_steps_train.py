@@ -107,20 +107,37 @@ class TestFitSupervised:
 
 
 class TestSave:
-    def test_save_logs_path(self, tmp_path, capsys):
+    def test_save_writes_model_to_run_dir(self, tmp_path, monkeypatch):
+        import keras
+        from unittest.mock import MagicMock
         from trader_keras.steps.train import save
 
-        model_path = tmp_path / "model.keras"
-        model_path.touch()
-        ctx = Ctx(cfg=_test_cfg(), model_path=model_path)
+        # Mock Hydra runtime to use tmp_path as output dir
+        mock_hydra = MagicMock()
+        mock_hydra.runtime.output_dir = str(tmp_path)
+        monkeypatch.setattr("hydra.core.hydra_config.HydraConfig.get", lambda: mock_hydra)
+
+        model = keras.Sequential([keras.layers.Dense(1, input_shape=(2,))])
+        cfg = _test_cfg()
+        cfg = OmegaConf.merge(cfg, {"save": {"export_onnx": False}})
+        ctx = Ctx(cfg=cfg, model=model)
         ctx = save(ctx)
-        assert ctx["model_path"] == model_path
+
+        assert ctx["model_path"] == tmp_path / "policy.keras"
+        assert ctx["model_path"].exists()
 
 
 class TestPipeIntegration:
-    def test_fit_then_save(self):
+    def test_fit_then_save(self, tmp_path, monkeypatch):
+        from unittest.mock import MagicMock
         from trader_keras.steps.train import fit_supervised, save
 
-        ctx = _make_ctx()
+        mock_hydra = MagicMock()
+        mock_hydra.runtime.output_dir = str(tmp_path)
+        monkeypatch.setattr("hydra.core.hydra_config.HydraConfig.get", lambda: mock_hydra)
+
+        cfg = _test_cfg()
+        cfg = OmegaConf.merge(cfg, {"save": {"export_onnx": False}})
+        ctx = _make_ctx(cfg)
         ctx = pipe(ctx, fit_supervised, save)
         assert ctx["model_path"].exists()

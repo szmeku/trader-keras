@@ -4,30 +4,34 @@
 
 ### Symptom
 
-`rl_small` config: reward stuck at -0.0003 across all 20 epochs. Loss changes (gradients flow), but policy behavior doesn't improve.
+`rl_small` config: reward stuck at -0.0003 across all 20 epochs with close-only reward. Loss changes (gradients flow), but policy behavior doesn't improve.
 
 ### Root cause
 
-Close-only reward (`rollout.py:102`) requires a two-step sequence to fire:
-1. Place pending order (limit/stop) → market triggers it → position opens
-2. Place opposite-side pending order → market triggers it → netting closes position → reward
+Close-only reward requires a two-step pending-order sequence to fire. Credit assignment gap of 10-100+ steps between the critical actions (placing orders) and the reward (position close). GAE can't reliably attribute reward to the right actions.
 
-A random/early policy almost never completes this in 2868 bars. ~99%+ of rewards are exactly 0, so GAE advantages are near-zero and gradients carry no useful signal.
+### Solution: configurable reward functions
 
-### Constraints
+Three reward types in `rl.reward.type`:
 
-- Only 1 pending order slot in the env (new order replaces old)
-- No market orders — all 6 action types are: HOLD, LIMIT_BUY, LIMIT_SELL, STOP_BUY, STOP_SELL, CANCEL
-- Limit prices = `ref_price * (1 + p1 * 0.01)` — order may never trigger if price doesn't reach level
+| Type | Formula | Use case |
+|------|---------|----------|
+| `close_only` | `realized_pnl/balance * has_close` | Pure trading PnL, very sparse |
+| `equity` | `equity_change/balance` | Dense signal, no close incentive |
+| `pbrs` | `equity_change/balance + alpha * close_pnl` | PBRS (Ng 1999), proven policy-invariant |
 
-### Attempted fixes
+PBRS with `alpha=1` is theoretically optimal (preserves optimal policy). Higher alpha (e.g. 10) learns faster but is asset-dependent.
 
-| # | Change | Result |
-|---|--------|--------|
-| 1 | Increase `entropy_coeff` (0.01 → ?) | pending |
+### Results
 
-### Possible future approaches
+| Reward | Epochs to positive reward | Notes |
+|--------|--------------------------|-------|
+| close_only | never (20 epochs) | stuck at -0.0003 |
+| pbrs alpha=1 | ~6 | slower bootstrap, reaches +0.04 by epoch 8 |
+| pbrs alpha=10 | ~3 | fastest, reaches +0.018 by epoch 3 |
 
-- **Reward shaping:** small bonus for having a position open (risk: hold-farming)
-- **Curriculum:** start with dense equity-change reward, anneal to close-only
-- **Env change:** add market order / close-position action type
+### Other fixes applied
+
+- **Truncated BPTT** (`tbptt_chunk=256`): 11 gradient updates per epoch instead of 1
+- **realized_pnl**: `CloseInfo.realized_pnl` captures commissions + swaps (not just price PnL)
+- **Reduced entropy_coeff**: agent was pinned to uniform randomness by entropy bonus

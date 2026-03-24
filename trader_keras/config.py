@@ -49,6 +49,12 @@ class WandbConfig:
 
 
 @dataclass
+class RewardConfig:
+    type: str = "pbrs"  # close_only | equity | pbrs
+    alpha: float = 1.0  # close bonus multiplier (pbrs only)
+
+
+@dataclass
 class RLConfig:
     n_epochs: int = 4
     clip_epsilon: float = 0.2
@@ -58,6 +64,8 @@ class RLConfig:
     gae_lambda: float = 0.95
     lr: float = 3e-4
     clip_grad_norm: float = 1.0
+    tbptt_chunk: int = 256
+    reward: RewardConfig = field(default_factory=RewardConfig)
 
 
 @dataclass
@@ -71,11 +79,17 @@ class EnvConfig:
 
 
 @dataclass
+class SaveConfig:
+    export_onnx: bool = True  # export ONNX + MT5 .set file alongside .keras
+
+
+@dataclass
 class Config:
     pipeline: PipelineConfig = field(default_factory=PipelineConfig)
     backbone: BackboneConfig = field(default_factory=BackboneConfig)
     data: DataConfig = field(default_factory=DataConfig)
     wandb: WandbConfig = field(default_factory=WandbConfig)
+    save: SaveConfig = field(default_factory=SaveConfig)
     train: Optional[TrainConfig] = None
     rl: Optional[RLConfig] = None
     env: Optional[EnvConfig] = None
